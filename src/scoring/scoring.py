@@ -1,18 +1,18 @@
 # Requires from upstream data pipeline:
 #   sequences  — (N, 48) int numpy array, one row per respondent, values 0–10
-#                category indices must match the constants defined below
-#                (SLEEP=0, EXERCISE=1, ..., OTHER=10)
+#                category indices must match src/utils/activity_map.py CATEGORIES list
 # Dependencies: numpy, scikit-learn — see requirements.txt
 
 import numpy as np
 from sklearn.cluster import KMeans
 
-SLEEP, EXERCISE, WORK, EDUCATION, EATING = 0, 1, 2, 3, 4
-SOCIALIZING, LEISURE, HOUSEHOLD, GROOMING, TRAVEL, OTHER = 5, 6, 7, 8, 9, 10
+# Indices match activity_map.py CATEGORIES ordering exactly
+SLEEP, GROOMING, WORK, EDUCATION, EATING = 0, 1, 2, 3, 4
+SOCIALIZING, LEISURE, HOUSEHOLD, EXERCISE, TRAVEL, OTHER = 5, 6, 7, 8, 9, 10
 
 CATEGORY_NAMES = (
-    "Sleep", "Exercise", "Work", "Education", "Eating",
-    "Socializing", "Leisure/Screen", "Household", "Grooming", "Travel", "Other",
+    "Sleep", "Grooming", "Work", "Education", "Eating",
+    "Socializing", "Leisure/Screen", "Household", "Exercise", "Travel", "Other",
 )
 
 NUM_CATEGORIES = 11
