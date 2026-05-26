@@ -242,3 +242,55 @@ def plot_model_comparison(
     fig.tight_layout()
     _save(fig, save_path)
     return fig, ax
+
+
+def plot_ablation_comparison(
+    results_dict: Mapping[str, Mapping[str, float]],
+    metric_names: Sequence[str],
+    save_path: Optional[str] = None,
+    title: Optional[str] = "Ablation comparison",
+):
+    """
+    Grouped bar chart comparing several metrics across model variants. Useful
+    for the lambda=0 vs lambda>0 (BPR-only vs BPR+KL) ablation: one group per
+    variant, one bar per metric.
+
+    Parameters
+    ----------
+    results_dict : mapping of variant_name -> mapping of metric_name -> float
+    metric_names : sequence of metric keys present in every inner dict
+    """
+    if not results_dict:
+        raise ValueError("results_dict is empty.")
+    if not metric_names:
+        raise ValueError("metric_names is empty.")
+
+    variants = list(results_dict.keys())
+    n_v = len(variants)
+    n_m = len(metric_names)
+    values = np.zeros((n_v, n_m), dtype=float)
+    for i, v in enumerate(variants):
+        for j, m in enumerate(metric_names):
+            if m not in results_dict[v]:
+                raise ValueError(f"Metric '{m}' missing for variant '{v}'.")
+            values[i, j] = float(results_dict[v][m])
+
+    fig, ax = plt.subplots(figsize=(max(1.1 * n_v + 2, 6), 4.5))
+    width = 0.8 / n_m
+    x = np.arange(n_v)
+    for j, m in enumerate(metric_names):
+        offset = (j - (n_m - 1) / 2) * width
+        bars = ax.bar(x + offset, values[:, j], width=width, label=m, edgecolor="white")
+        for rect, v in zip(bars, values[:, j]):
+            ax.text(
+                rect.get_x() + rect.get_width() / 2, v,
+                f"{v:.2f}", ha="center", va="bottom", fontsize=7,
+            )
+    ax.set_xticks(x)
+    ax.set_xticklabels(variants, rotation=20, ha="right")
+    ax.set_ylabel("Metric value")
+    ax.set_title(title)
+    ax.legend(fontsize=8, ncol=min(n_m, 4))
+    fig.tight_layout()
+    _save(fig, save_path)
+    return fig, ax

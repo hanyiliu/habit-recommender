@@ -10,6 +10,17 @@ Conventions
 y_true   : shape (n_samples,)              integer class labels in [0, n_classes)
 y_scores : shape (n_samples, n_classes)    higher score == more recommended
 sequences: 1-D integer arrays of equal length (e.g. 48 time slots per day)
+
+For this repo, n_classes == 11 and sequence length == 48. Activity labels
+match `src/utils/activity_map.py::CATEGORIES`. When evaluating a GRU4Rec /
+LSTMRec / TransformerRec model, the typical layout is:
+
+    n_samples = n_users * n_predicted_slots
+    y_true[i] = true category at slot t for some (user, t)
+    y_scores[i] = model logits/probabilities for slot t
+
+Higher score == more recommended; logits and softmax probabilities both work
+because every metric here is invariant to monotonic per-row transforms.
 """
 
 from __future__ import annotations
@@ -127,6 +138,25 @@ def evaluate_ranking(
     return out
 
 
+def per_class_accuracy(
+    y_true,
+    y_scores,
+    n_classes: Optional[int] = None,
+) -> dict:
+    """
+    Per-class top-1 accuracy (recall), keyed by class id as a string. Classes
+    absent from y_true are reported as None so JSON output stays well-formed.
+    """
+    y_true, y_scores = _validate_ranking_inputs(y_true, y_scores)
+    K = n_classes if n_classes is not None else y_scores.shape[1]
+    preds = np.argmax(y_scores, axis=1)
+    out: dict = {}
+    for c in range(K):
+        mask = y_true == c
+        out[str(c)] = float((preds[mask] == c).mean()) if mask.any() else None
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Sequence metrics
 # ---------------------------------------------------------------------------
@@ -234,6 +264,9 @@ def evaluate_all(
 
     if y_true is not None and y_scores is not None:
         results.update(evaluate_ranking(y_true, y_scores, ks=ks))
+        results["per_class_accuracy"] = per_class_accuracy(
+            y_true, y_scores, n_classes=n_classes
+        )
 
     if true_sequence is not None and pred_sequence is not None:
         results["sequence_match"] = sequence_match_score(true_sequence, pred_sequence)

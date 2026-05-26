@@ -34,22 +34,20 @@ from src.eval.evaluation import (  # noqa: E402
     sequence_match_score,
 )
 from src.analysis.visualization import (  # noqa: E402
+    plot_ablation_comparison,
     plot_error_by_activity,
     plot_error_by_time_slot,
     plot_model_comparison,
     plot_score_distribution,
     plot_template_heatmap,
 )
+from src.utils.activity_map import CATEGORIES as ACTIVITY_LABELS  # noqa: E402
 
 
 N_SAMPLES = 200
-N_CLASSES = 11
+N_CLASSES = len(ACTIVITY_LABELS)  # 11 for this project
 N_SLOTS = 48
 N_CLUSTERS = 5
-ACTIVITY_LABELS = [
-    "Sleep", "Work", "Eat", "Travel", "Care",
-    "Leisure", "Exercise", "Shop", "Chores", "Social", "Other",
-]
 
 
 def main() -> None:
@@ -96,7 +94,14 @@ def main() -> None:
         n_classes=N_CLASSES,
     )
     for k, v in combined.items():
-        print(f"  {k}: {v:.3f}")
+        if isinstance(v, dict):
+            inner = ", ".join(
+                f"{kk}={'na' if vv is None else f'{vv:.2f}'}"
+                for kk, vv in v.items()
+            )
+            print(f"  {k}: {{ {inner} }}")
+        else:
+            print(f"  {k}: {v:.3f}")
 
     # ---- Plots ---------------------------------------------------------------
     out_dir = os.path.join(HERE, "demo_outputs")
@@ -143,6 +148,19 @@ def main() -> None:
     plot_model_comparison(
         results, metric_name="ndcg@5",
         save_path=os.path.join(out_dir, "comparison_ndcg5.png"),
+    )
+
+    # Ablation: lambda=0 (BPR only) vs lambda>0 (BPR + KL).
+    ablation = {
+        "lambda=0":   results["GRU4Rec_lambda=0"],
+        "lambda=0.5": results["GRU4Rec_lambda=0.5"],
+        "lambda=1.0": results["GRU4Rec_lambda=1.0"],
+    }
+    plot_ablation_comparison(
+        ablation,
+        metric_names=["accuracy", "hit_rate@5", "ndcg@5"],
+        title="Ablation: BPR-only vs BPR+KL (synthetic)",
+        save_path=os.path.join(out_dir, "ablation_lambda.png"),
     )
 
     print(f"\nFigures written to: {out_dir}")
