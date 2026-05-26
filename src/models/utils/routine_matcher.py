@@ -7,7 +7,7 @@ class RoutineMatcher:
     """
     def __init__(self, routines: np.ndarray):
         if routines.ndim != 2 or routines.shape[1] != 48:
-            raise ValueError(f"Templates must be of shape (k, 48), got {routines.shape}")
+            raise ValueError(f"routines must be of shape (K, 48), got {routines.shape}")
         self.routines = routines.astype(np.float32)
 
     def get_targets(self, sequences: np.ndarray, slot_t: int) -> np.ndarray:
@@ -24,13 +24,15 @@ class RoutineMatcher:
         Returns:
             np.ndarray (B,): Matching activity at slot_t from the nearest template.
         """
+        if sequences.ndim != 2 or sequences.shape[1] != 48:
+            raise ValueError(f"sequences must be of shape (B, 48), got {sequences.shape}")
         if slot_t < 1 or slot_t >= 48:
             raise ValueError(f"slot_t must be in [1, 47], got {slot_t}")
         partial_seqs = sequences[:, :slot_t] # (B, slot_t)
         partial_routines = self.routines[:, :slot_t] #(K, slot_t)
 
-        diffs = partial_seqs[:, np.newaxis, :] - partial_routines[np.newaxis, :, :]
-        distances = np.sqrt((diffs ** 2).sum(axis=-1)) # (B, K)
+        # Hamming distance: count mismatching slots (activity IDs are categorical, not ordinal)
+        distances = (partial_seqs[:, np.newaxis, :] != partial_routines[np.newaxis, :, :]).sum(axis=-1)  # (B, K)
 
         best_idx = distances.argmin(axis=1) # (B,)
 
