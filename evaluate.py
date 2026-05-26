@@ -11,7 +11,6 @@ Expected on-disk layout (relative to repo root):
     data/processed/
         sequences.pkl              # output of preprocess.py (dict TUCASEID -> (48,) int)
         predictions.npz            # produced by training/eval script (see below)
-        routines.npz               # optional: output of scoring.build_routines
 
 `predictions.npz` is the canonical hand-off from the training side. It must
 contain at minimum:
@@ -27,12 +26,6 @@ It may also include any of:
     true_sequence      : int array (48,)                ground-truth day for that user
     original_sequence  : int array (48,)                original (un-fixed) day for deviation_reduction
     template_sequence  : int array (48,)                cluster template for that user
-
-`routines.npz` (optional):
-
-    routines  : int array (K, 48)
-    labels    : int array (n_users,)
-    scores    : float array (n_users,)
 
 Run:
 
@@ -58,7 +51,6 @@ from src.eval.evaluation import (
 
 REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_PRED_PATH = REPO_ROOT / "data" / "processed" / "predictions.npz"
-DEFAULT_ROUTINES_PATH = REPO_ROOT / "data" / "processed" / "routines.npz"
 
 
 def _load_npz(path: Path) -> Optional[dict]:
@@ -100,11 +92,6 @@ def main() -> int:
         help=f"Path to .npz with y_true and y_scores (default: {DEFAULT_PRED_PATH})",
     )
     parser.add_argument(
-        "--routines", type=Path, default=DEFAULT_ROUTINES_PATH,
-        help="Optional .npz with cluster routines (default looks for "
-             "data/processed/routines.npz; only used for sequence metrics).",
-    )
-    parser.add_argument(
         "--out", type=Path, default=None,
         help="Optional path to write the metrics report as JSON.",
     )
@@ -128,6 +115,14 @@ def main() -> int:
 
     y_true = np.asarray(preds["y_true"])
     y_scores = np.asarray(preds["y_scores"])
+
+    if y_true.ndim != 1 or y_scores.ndim != 2 or y_scores.shape[0] != y_true.shape[0]:
+        print(
+            f"Predictions file {args.predictions} has malformed shapes: "
+            f"y_true{y_true.shape} (expected 1-D) and "
+            f"y_scores{y_scores.shape} (expected 2-D with matching first dim)."
+        )
+        return 1
 
     results: dict = {
         "predictions_path": str(args.predictions),

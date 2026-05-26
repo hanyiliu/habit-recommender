@@ -25,7 +25,7 @@ because every metric here is invariant to monotonic per-row transforms.
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Optional, Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 
