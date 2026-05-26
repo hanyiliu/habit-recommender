@@ -1,19 +1,21 @@
+"""KL divergence loss between model output and routine template target."""
 import torch
 import torch.nn.functional as F
 
+
 def kl_loss(
-    logits: torch.FloatTensor,
-    routine_targets: torch.LongTensor,
-) -> torch.FloatTensor:
+    logits: torch.Tensor,
+    routine_targets: torch.Tensor,
+) -> torch.Tensor:
     """KL divergence between model output and routine template one-hot target.
 
     Implemented as cross-entropy, equivalent to KL(one_hot || softmax(logits)).
 
     Args:
-        logits:          (B, n_activities) unnormalized scores
-        routine_targets: (B,) activity index from the nearest routine at slot T
+        logits (torch.Tensor, (B, n_activities)): Unnormalized scores
+        routine_targets (torch.Tensor, (B,)): Activity index from the nearest routine at slot T
 
     Returns:
-        Scalar KL loss.
+        torch.Tensor: Scalar KL loss.
     """
     return F.cross_entropy(logits, routine_targets)
