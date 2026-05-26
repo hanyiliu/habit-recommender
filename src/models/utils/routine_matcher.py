@@ -1,6 +1,17 @@
+"""Helper class for finding closest optimal routine.
+
+Raises:
+    ValueError: Raised when template shape doesn't match expected.
+    ValueError: Raised when slot index is outside of expected range.
+
+Returns:
+    _type_: _description_
+"""
 import numpy as np
 
 class RoutineMatcher:
+    """Helper class for finding closest optimal routine.
+    """
     def __init__(self, routines: np.ndarray):
         if routines.ndim != 2 or routines.shape[1] != 48:
             raise ValueError(f"Templates must be of shape (k, 48), got {routines.shape}")
@@ -10,7 +21,8 @@ class RoutineMatcher:
         """Find target optimal routine for given sequence, and the optimal next routine.
 
         Args:
-            sequences (np.ndarray, (B, 48)): slot buffer, where each item is one daily routine, total of B items in one batch.
+            sequences (np.ndarray, (B, 48)): slot buffer, where each item
+                is one daily routine, total of B items in one batch.
             slot_t (int in [1, 47]): Slot index to be predicted.
 
         Raises:
@@ -18,9 +30,9 @@ class RoutineMatcher:
 
         Returns:
             np.ndarray (B,): Matching activity at slot_t from the nearest template.
-        """        
+        """
         if slot_t < 1 or slot_t >= 48:
-            raise ValueError(f"slot_t mus be in [1, 47], got {slot_t}")
+            raise ValueError(f"slot_t must be in [1, 47], got {slot_t}")
         partial_seqs = sequences[:, :slot_t] # (B, slot_t)
         partial_routines = self.routines[:, :slot_t] #(K, slot_t)
 
