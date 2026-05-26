@@ -1,7 +1,8 @@
-# Requires from preprocessing:
+# Requires from upstream data pipeline:
 #   sequences  — (N, 48) int numpy array, one row per respondent, values 0–10
-#                produced by src/data/preprocessing/preprocessing.py
-#                (category mapping must match the constants defined below)
+#                category indices must match the constants defined below
+#                (SLEEP=0, EXERCISE=1, ..., OTHER=10)
+# Dependencies: numpy, scikit-learn — see requirements.txt
 
 import numpy as np
 from sklearn.cluster import KMeans
@@ -53,7 +54,13 @@ def _longest_run(seq, category):
 
 
 def score_sleep_contiguity(seq):
-    return min(_longest_run(seq, SLEEP) / CDC_SLEEP_SLOTS, 1.0)
+    # Diary wraps at 4 AM — sleep spanning midnight is split across the boundary
+    # (e.g. 10 PM–7 AM appears as slots 36–47 then 0–6). Doubling the sequence
+    # makes boundary-crossing runs contiguous; cap at NUM_SLOTS to avoid
+    # double-counting a run that fills more than half the day.
+    doubled = list(seq) + list(seq)
+    run = min(_longest_run(doubled, SLEEP), NUM_SLOTS)
+    return min(run / CDC_SLEEP_SLOTS, 1.0)
 
 
 def score_exercise_presence(seq):
@@ -68,7 +75,9 @@ def score_meal_regularity(seq):
         return 0.0
     total = 0.0
     for anchor in MEAL_ANCHORS:
-        nearest = np.abs(eating_slots - anchor).min()
+        d = np.abs(eating_slots - anchor)
+        # circular distance: wrap around the 48-slot diary boundary
+        nearest = np.minimum(d, NUM_SLOTS - d).min()
         total += np.exp(-0.5 * (nearest / MEAL_SIGMA) ** 2)
     return total / len(MEAL_ANCHORS)
 
@@ -92,6 +101,12 @@ def score_work_structure(seq):
 def compute_health_score(seq, weights=None):
     """Return a scalar health score in [0, 1] for a 48-slot activity sequence."""
     w = DEFAULT_WEIGHTS if weights is None else np.asarray(weights, dtype=float)
+    if w.shape != (5,):
+        raise ValueError(f"weights must have length 5, got {w.shape}")
+    if not np.all(np.isfinite(w)):
+        raise ValueError("weights must all be finite")
+    if w.sum() <= 0:
+        raise ValueError("weights must sum to a positive value")
     w = w / w.sum()
     components = np.array([
         score_sleep_contiguity(seq),
@@ -107,11 +122,20 @@ def compute_health_score(seq, weights=None):
 # Routine builder
 # ---------------------------------------------------------------------------
 
+def _slot_mode(seqs):
+    """Per-slot majority category across a set of integer sequences."""
+    result = np.empty(seqs.shape[1], dtype=int)
+    for j in range(seqs.shape[1]):
+        values, counts = np.unique(seqs[:, j], return_counts=True)
+        result[j] = values[np.argmax(counts)]
+    return result
+
+
 def build_routines(sequences, K, threshold=0.5, min_cluster_size=30,
                    weights=None, random_state=42):
     """
-    Cluster respondents, score individuals, and average the top-scorers in each
-    cluster to produce one optimal routine vector per cluster.
+    Cluster respondents, score individuals, and compute the per-slot mode of
+    the top-scorers in each cluster to produce one optimal routine per cluster.
 
     Args:
         sequences        (N, 48) int array — one row per respondent
@@ -123,14 +147,17 @@ def build_routines(sequences, K, threshold=0.5, min_cluster_size=30,
         random_state     passed to KMeans for reproducibility
 
     Returns:
-        routines  (R, 48) float — one routine per surviving cluster (R ≤ K)
-        labels    (N,)    int   — cluster index per respondent after merging
+        routines  (R, 48) int — one routine per surviving cluster (R ≤ K)
+        labels    (N,)    int — cluster index per respondent after merging
         scores    (N,)    float — per-respondent health score
+
+    Raises:
+        ValueError if no cluster meets min_cluster_size after thresholding.
     """
-    sequences = np.asarray(sequences, dtype=float)
+    sequences = np.asarray(sequences, dtype=int)
 
     kmeans = KMeans(n_clusters=K, n_init=10, random_state=random_state)
-    labels = kmeans.fit_predict(sequences).copy()
+    labels = kmeans.fit_predict(sequences.astype(float)).copy()
     centroids = kmeans.cluster_centers_
 
     scores = np.array([compute_health_score(seq, weights) for seq in sequences])
@@ -143,10 +170,15 @@ def build_routines(sequences, K, threshold=0.5, min_cluster_size=30,
         return int(np.sum(scores[mask] >= cutoff))
 
     valid = {k for k in range(K) if _qualifying_count(k, labels) >= min_cluster_size}
+    if not valid:
+        raise ValueError(
+            f"No cluster met min_cluster_size={min_cluster_size} at threshold={threshold}. "
+            "Try lowering min_cluster_size, raising threshold, or reducing K."
+        )
     invalid = set(range(K)) - valid
 
     # reassign each invalid cluster's respondents to the nearest valid centroid
-    if invalid and valid:
+    if invalid:
         valid_arr = np.array(sorted(valid))
         for k in invalid:
             dists = np.linalg.norm(centroids[valid_arr] - centroids[k], axis=1)
@@ -160,7 +192,7 @@ def build_routines(sequences, K, threshold=0.5, min_cluster_size=30,
         cluster_seqs = sequences[mask]
         cutoff = np.quantile(cluster_scores, 1.0 - threshold)
         top_seqs = cluster_seqs[cluster_scores >= cutoff]
-        routines.append(top_seqs.mean(axis=0))
+        routines.append(_slot_mode(top_seqs))
 
     return np.array(routines), labels, scores
 
