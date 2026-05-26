@@ -1,11 +1,4 @@
 """Helper class for finding closest optimal routine.
-
-Raises:
-    ValueError: Raised when template shape doesn't match expected.
-    ValueError: Raised when slot index is outside of expected range.
-
-Returns:
-    _type_: _description_
 """
 import numpy as np
 
