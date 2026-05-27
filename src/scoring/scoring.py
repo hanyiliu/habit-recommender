@@ -1,6 +1,8 @@
 # Requires from upstream data pipeline:
 #   sequences  — (N, 48) int numpy array, one row per respondent, values 0–10
-#                category indices must match src/utils/activity_map.py CATEGORIES list
+#                category indices must match the constants defined below
+#                ordering: Sleep=0, Grooming=1, Work=2, Education=3, Eating=4,
+#                          Socializing=5, Leisure=6, Household=7, Exercise=8, Travel=9, Other=10
 # Dependencies: numpy, scikit-learn — see requirements.txt
 
 import numpy as np
