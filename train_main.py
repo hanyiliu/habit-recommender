@@ -9,6 +9,7 @@ Usage:
 """
 import argparse
 import pickle
+import random
 from pathlib import Path
 
 import numpy as np
@@ -26,11 +27,23 @@ def _load_model_class(name: str):
     if name == "gru4rec":
         return GRU4Rec
     if name == "lstm":
-        from src.models.lstm_rec import LSTMRec
-        return LSTMRec
+        try:
+            from src.models.lstm_rec import LSTMRec
+            return LSTMRec
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError(
+                "LSTMRec is not yet implemented. "
+                "See docs/superpowers/plans/2026-05-26-ablation-models.md."
+            ) from None
     if name == "transformer":
-        from src.models.transformer_rec import TransformerRec
-        return TransformerRec
+        try:
+            from src.models.transformer_rec import TransformerRec
+            return TransformerRec
+        except ModuleNotFoundError:
+            raise ModuleNotFoundError(
+                "TransformerRec is not yet implemented. "
+                "See docs/superpowers/plans/2026-05-26-ablation-models.md."
+            ) from None
     raise ValueError(f"Unknown model: {name}")
 
 
@@ -60,7 +73,17 @@ def build_args() -> argparse.Namespace:
 def main():
     args = build_args()
 
-    sequences = pickle.loads(Path(args.sequences).read_bytes())
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    seq_path = Path(args.sequences)
+    if not seq_path.exists():
+        raise FileNotFoundError(
+            f"Sequences file not found: {seq_path}\n"
+            "Run 'python preprocess.py' first to generate it."
+        )
+    sequences = pickle.loads(seq_path.read_bytes())
 
     train_seqs, val_seqs, test_seqs = train_val_test_split(
         sequences,
@@ -99,7 +122,7 @@ def main():
     )
     trainer.fit(args.epochs, checkpoint_path=args.checkpoint)
 
-    metrics = evaluate_model(model, test_loader, device=args.device)
+    metrics = evaluate_model(trainer.model, test_loader, device=args.device)
     print(f"\nTest metrics | hit@1: {metrics['hit@1']:.4f} | hit@5: {metrics['hit@5']:.4f} | MRR: {metrics['mrr']:.4f}")
 
 
