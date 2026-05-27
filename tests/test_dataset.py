@@ -1,6 +1,5 @@
 # tests/test_dataset.py
 import numpy as np
-import pytest
 import torch
 
 from src.data.dataset import ATUSDataset, build_user_mapping, train_val_test_split

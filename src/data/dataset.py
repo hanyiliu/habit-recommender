@@ -24,6 +24,8 @@ class ATUSDataset(Dataset):
         routines: np.ndarray,  # (K, 48) int array
         window_size: int = 24,
     ):
+        if not (1 <= window_size <= 47):
+            raise ValueError(f"window_size must be in [1, 47], got {window_size}")
         matcher = RoutineMatcher(routines)
         items = []
         for tucaseid, seq in sequences.items():
