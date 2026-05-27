@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from src.eval.evaluation import hit_at_k, mrr
+from src.eval.evaluation import hit_at_k, mrr, evaluate_model
 
 
 def test_hit_at_1_correct():
@@ -48,3 +48,24 @@ def test_mrr_batch_average():
     logits  = torch.tensor([[0.9, 0.1], [0.1, 0.9]])
     targets = torch.tensor([0, 0])  # first correct (rank 1), second wrong (rank 2)
     assert mrr(logits, targets) == pytest.approx(0.75)
+
+
+def test_evaluate_model_smoke():
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+
+    class DummyModel(nn.Module):
+        def forward(self, context, user_ids):
+            return torch.zeros(context.size(0), 11)
+
+    n = 8
+    context         = torch.randint(0, 11, (n, 4))
+    user_ids        = torch.randint(0, 3,  (n,))
+    targets         = torch.randint(0, 11, (n,))
+    routine_targets = torch.randint(0, 11, (n,))
+    loader = DataLoader(TensorDataset(context, user_ids, targets, routine_targets), batch_size=4)
+
+    model   = DummyModel()
+    metrics = evaluate_model(model, loader)
+    assert set(metrics.keys()) == {"hit@1", "hit@5", "mrr"}
+    assert all(isinstance(v, float) for v in metrics.values())

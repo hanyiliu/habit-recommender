@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 
 def hit_at_k(logits: torch.Tensor, targets: torch.Tensor, k: int) -> float:
     """Fraction of examples where the true label appears in the top-k predictions."""
+    k = min(k, logits.size(-1))
     top_k = torch.topk(logits, k, dim=-1).indices      # (B, k)
     hits  = (top_k == targets.unsqueeze(-1)).any(-1)   # (B,)
     return hits.float().mean().item()
@@ -28,6 +29,8 @@ def evaluate_model(model: nn.Module, loader: DataLoader, device: str = "cpu") ->
         logits = model(context.to(device), user_ids.to(device)).cpu()
         all_logits.append(logits)
         all_targets.append(targets)
+    if not all_logits:
+        return {"hit@1": 0.0, "hit@5": 0.0, "mrr": 0.0}
     logits  = torch.cat(all_logits)
     targets = torch.cat(all_targets)
     return {
