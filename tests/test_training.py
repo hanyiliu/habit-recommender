@@ -55,6 +55,8 @@ def test_fit_saves_checkpoint(tmp_path):
     saved = torch.load(ckpt, weights_only=False)
     assert "model_state"     in saved
     assert "optimizer_state" in saved
+    assert "scheduler_state" in saved
+    assert "epoch"           in saved
     assert "val_loss"        in saved
 
 

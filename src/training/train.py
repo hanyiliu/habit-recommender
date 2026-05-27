@@ -28,8 +28,11 @@ class Trainer:
         self.scheduler    = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", patience=5, factor=0.5
         )
+        self.best_val     = float("inf")
 
     def train_epoch(self) -> float:
+        if len(self.train_loader) == 0:
+            raise ValueError("train_loader is empty — check your dataset and split configuration")
         self.model.train()
         total = 0.0
         for context, user_ids, targets, routine_targets in self.train_loader:
@@ -47,6 +50,8 @@ class Trainer:
 
     @torch.no_grad()
     def validate(self) -> float:
+        if len(self.val_loader) == 0:
+            raise ValueError("val_loader is empty — check your dataset and split configuration")
         self.model.eval()
         total = 0.0
         for context, user_ids, targets, routine_targets in self.val_loader:
@@ -67,21 +72,21 @@ class Trainer:
         ckpt_dir = os.path.dirname(checkpoint_path)
         if ckpt_dir:
             os.makedirs(ckpt_dir, exist_ok=True)
-        best_val = float("inf")
         history  = []
         for epoch in range(1, n_epochs + 1):
             train_loss = self.train_epoch()
             val_loss   = self.validate()
             self.scheduler.step(val_loss)
             history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
-            if val_loss < best_val:
-                best_val = val_loss
+            if val_loss < self.best_val:
+                self.best_val = val_loss
                 torch.save(
                     {
-                        "epoch":           epoch,
-                        "model_state":     self.model.state_dict(),
-                        "optimizer_state": self.optimizer.state_dict(),
-                        "val_loss":        val_loss,
+                        "epoch":            epoch,
+                        "model_state":      self.model.state_dict(),
+                        "optimizer_state":  self.optimizer.state_dict(),
+                        "scheduler_state":  self.scheduler.state_dict(),
+                        "val_loss":         val_loss,
                     },
                     checkpoint_path,
                 )
