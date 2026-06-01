@@ -17,7 +17,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.data.dataset import ATUSDataset, build_user_mapping, train_val_test_split
-from src.eval.evaluation import evaluate_model
+from src.eval.torch_metrics import evaluate_model
 from src.models.gru4rec import GRU4Rec
 from src.scoring.scoring import build_routines
 from src.training.train import Trainer

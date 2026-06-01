@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from src.eval.evaluation import hit_at_k, mrr, evaluate_model
+from src.eval.torch_metrics import hit_at_k, mrr, evaluate_model
 
 
 def test_hit_at_1_correct():
