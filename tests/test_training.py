@@ -1,0 +1,71 @@
+import os
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
+from src.models.gru4rec import GRU4Rec
+from src.training.train import Trainer
+
+
+def _make_toy_loader(n: int = 16, T: int = 8, n_users: int = 5) -> DataLoader:
+    # Tuple order matches HabitDataset: (context, target, user_id, routine_target)
+    context         = torch.randint(0, 11, (n, T))
+    targets         = torch.randint(0, 11, (n,))
+    user_ids        = torch.randint(0, n_users, (n,))
+    routine_targets = torch.randint(0, 11, (n,))
+    ds = TensorDataset(context, targets, user_ids, routine_targets)
+    return DataLoader(ds, batch_size=4)
+
+
+def test_train_epoch_returns_positive_float():
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    trainer = Trainer(model, loader, loader)
+    loss    = trainer.train_epoch()
+    assert isinstance(loss, float)
+    assert loss > 0
+
+
+def test_validate_returns_positive_float():
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    trainer = Trainer(model, loader, loader)
+    loss    = trainer.validate()
+    assert isinstance(loss, float)
+    assert loss > 0
+
+
+def test_fit_returns_history(tmp_path):
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    ckpt    = str(tmp_path / "best.pt")
+    trainer = Trainer(model, loader, loader)
+    history = trainer.fit(n_epochs=2, checkpoint_path=ckpt)
+    assert len(history) == 2
+    assert "epoch"      in history[0]
+    assert "train_loss" in history[0]
+    assert "val_loss"   in history[0]
+
+
+def test_fit_saves_checkpoint(tmp_path):
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    ckpt    = str(tmp_path / "best.pt")
+    trainer = Trainer(model, loader, loader)
+    trainer.fit(n_epochs=2, checkpoint_path=ckpt)
+    assert os.path.exists(ckpt)
+    saved = torch.load(ckpt, weights_only=False)
+    assert "model_state"     in saved
+    assert "optimizer_state" in saved
+    assert "scheduler_state" in saved
+    assert "epoch"           in saved
+    assert "val_loss"        in saved
+
+
+def test_fit_with_lambda_kl_zero(tmp_path):
+    # BPR-only ablation: lambda_kl=0.0 must still train without error
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    ckpt    = str(tmp_path / "best.pt")
+    trainer = Trainer(model, loader, loader, lambda_kl=0.0)
+    history = trainer.fit(n_epochs=1, checkpoint_path=ckpt)
+    assert history[0]["train_loss"] > 0
