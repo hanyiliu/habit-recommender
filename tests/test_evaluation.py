@@ -1,58 +1,40 @@
-import torch
+import numpy as np
 import pytest
 
-from src.eval.torch_metrics import hit_at_k, mrr, evaluate_model
+from src.eval.evaluation import hit_rate_at_k, next_activity_accuracy
 
 
-def test_hit_at_1_correct():
-    logits  = torch.tensor([[0.1, 0.9, 0.3]])
-    targets = torch.tensor([1])
-    assert hit_at_k(logits, targets, k=1) == pytest.approx(1.0)
+def test_hit_rate_at_1_correct():
+    y_scores = np.array([[0.1, 0.9, 0.3]])
+    y_true = np.array([1])
+    assert hit_rate_at_k(y_true, y_scores, k=1) == pytest.approx(1.0)
 
 
-def test_hit_at_1_wrong():
-    logits  = torch.tensor([[0.1, 0.9, 0.3]])
-    targets = torch.tensor([0])
-    assert hit_at_k(logits, targets, k=1) == pytest.approx(0.0)
+def test_hit_rate_at_1_wrong():
+    y_scores = np.array([[0.1, 0.9, 0.3]])
+    y_true = np.array([0])
+    assert hit_rate_at_k(y_true, y_scores, k=1) == pytest.approx(0.0)
 
 
-def test_hit_at_k_in_top5():
-    # 5 classes, correct is last in descending ranking
-    logits  = torch.tensor([[0.5, 0.4, 0.3, 0.2, 0.1]])
-    targets = torch.tensor([4])
-    assert hit_at_k(logits, targets, k=5) == pytest.approx(1.0)
-    assert hit_at_k(logits, targets, k=1) == pytest.approx(0.0)
+def test_hit_rate_at_k_in_top5():
+    y_scores = np.array([[0.5, 0.4, 0.3, 0.2, 0.1]])
+    y_true = np.array([4])
+    assert hit_rate_at_k(y_true, y_scores, k=5) == pytest.approx(1.0)
+    assert hit_rate_at_k(y_true, y_scores, k=1) == pytest.approx(0.0)
 
 
-def test_hit_at_k_batch_average():
-    # 2 examples: first correct, second wrong → average = 0.5
-    logits  = torch.tensor([[0.9, 0.1], [0.1, 0.9]])
-    targets = torch.tensor([0, 0])
-    assert hit_at_k(logits, targets, k=1) == pytest.approx(0.5)
-
-
-def test_mrr_rank_1():
-    logits  = torch.tensor([[0.9, 0.1, 0.5, 0.3]])
-    targets = torch.tensor([0])     # highest score → rank 1
-    assert mrr(logits, targets) == pytest.approx(1.0)
-
-
-def test_mrr_rank_2():
-    logits  = torch.tensor([[0.9, 0.1, 0.5, 0.3]])
-    targets = torch.tensor([2])     # 2nd-highest → rank 2
-    assert mrr(logits, targets) == pytest.approx(0.5)
-
-
-def test_mrr_batch_average():
-    # rank-1 (MRR=1.0) and rank-2 (MRR=0.5) → average = 0.75
-    logits  = torch.tensor([[0.9, 0.1], [0.1, 0.9]])
-    targets = torch.tensor([0, 0])  # first correct (rank 1), second wrong (rank 2)
-    assert mrr(logits, targets) == pytest.approx(0.75)
+def test_accuracy_batch_average():
+    y_scores = np.array([[0.9, 0.1], [0.1, 0.9]])
+    y_true = np.array([0, 0])  # first correct, second wrong → 0.5
+    assert next_activity_accuracy(y_true, y_scores) == pytest.approx(0.5)
 
 
 def test_evaluate_model_smoke():
+    import torch
     import torch.nn as nn
     from torch.utils.data import DataLoader, TensorDataset
+
+    from train_main import evaluate_model
 
     class DummyModel(nn.Module):
         def forward(self, context, user_ids):
@@ -60,12 +42,12 @@ def test_evaluate_model_smoke():
 
     n = 8
     context         = torch.randint(0, 11, (n, 4))
-    user_ids        = torch.randint(0, 3,  (n,))
     targets         = torch.randint(0, 11, (n,))
+    user_ids        = torch.randint(0, 3,  (n,))
     routine_targets = torch.randint(0, 11, (n,))
-    loader = DataLoader(TensorDataset(context, user_ids, targets, routine_targets), batch_size=4)
+    loader = DataLoader(TensorDataset(context, targets, user_ids, routine_targets), batch_size=4)
 
-    model   = DummyModel()
-    metrics = evaluate_model(model, loader)
-    assert set(metrics.keys()) == {"hit@1", "hit@5", "mrr"}
-    assert all(isinstance(v, float) for v in metrics.values())
+    metrics = evaluate_model(DummyModel(), loader)
+    assert "accuracy" in metrics
+    assert "hit_rate@5" in metrics
+    assert all(isinstance(v, float) for k, v in metrics.items() if not k.startswith("per_class"))

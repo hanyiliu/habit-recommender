@@ -2,7 +2,11 @@
 import numpy as np
 import torch
 
-from src.data.dataset import ATUSDataset, build_user_mapping, train_val_test_split
+from src.data.preprocessing.dataset import (
+    HabitDataset,
+    build_user_mapping,
+    train_val_test_split,
+)
 
 
 def _fake_sequences(n: int, seed: int = 0) -> dict:
@@ -15,32 +19,33 @@ def _fake_routines(k: int = 2) -> np.ndarray:
 
 
 def test_dataset_length():
-    seqs = _fake_sequences(3)
-    routines = _fake_routines()
-    u2i = build_user_mapping(seqs)
-    ds = ATUSDataset(seqs, u2i, routines, window_size=24)
-    # 3 users × (48 - 24) target slots each
+    arr = np.stack([_fake_sequences(3)[i] for i in range(3)])
+    ds = HabitDataset(arr, window_size=24)
+    # 3 users × (48 - 24) windows each
     assert len(ds) == 3 * (48 - 24)
 
 
-def test_dataset_item_shapes():
-    seqs = _fake_sequences(1)
-    routines = _fake_routines()
-    u2i = build_user_mapping(seqs)
-    ds = ATUSDataset(seqs, u2i, routines, window_size=8)
-    context, uid, target, rt = ds[0]
+def test_dataset_item_shapes_with_routines():
+    arr = np.stack([_fake_sequences(1)[0]])
+    ds = HabitDataset(arr, window_size=8, routines=_fake_routines())
+    context, target, uid, rt = ds[0]
     assert context.shape == (8,)
-    assert uid.shape == ()
     assert target.shape == ()
+    assert uid.shape == ()
     assert rt.shape == ()
 
 
+def test_dataset_three_tuple_without_routines():
+    arr = np.stack([_fake_sequences(1)[0]])
+    ds = HabitDataset(arr, window_size=8)
+    item = ds[0]
+    assert len(item) == 3
+
+
 def test_dataset_values_in_range():
-    seqs = _fake_sequences(2)
-    routines = _fake_routines()
-    u2i = build_user_mapping(seqs)
-    ds = ATUSDataset(seqs, u2i, routines, window_size=8)
-    context, uid, target, rt = ds[0]
+    arr = np.stack([_fake_sequences(2)[i] for i in range(2)])
+    ds = HabitDataset(arr, window_size=8, routines=_fake_routines())
+    context, target, uid, rt = ds[0]
     assert 0 <= target.item() <= 10
     assert 0 <= rt.item() <= 10
     assert context.min() >= 0
@@ -48,15 +53,22 @@ def test_dataset_values_in_range():
 
 
 def test_dataset_dtypes():
-    seqs = _fake_sequences(1)
-    routines = _fake_routines()
-    u2i = build_user_mapping(seqs)
-    ds = ATUSDataset(seqs, u2i, routines, window_size=4)
-    context, uid, target, rt = ds[0]
+    arr = np.stack([_fake_sequences(1)[0]])
+    ds = HabitDataset(arr, window_size=4, routines=_fake_routines())
+    context, target, uid, rt = ds[0]
     assert context.dtype == torch.long
-    assert uid.dtype == torch.long
     assert target.dtype == torch.long
+    assert uid.dtype == torch.long
     assert rt.dtype == torch.long
+
+
+def test_dataset_user_ids_global():
+    arr = np.stack([_fake_sequences(2)[i] for i in range(2)])
+    ds = HabitDataset(arr, window_size=8, user_ids=np.array([5, 9]))
+    _, _, uid0 = ds[0]
+    _, _, uid1 = ds[ds.windows_per_seq]
+    assert uid0.item() == 5
+    assert uid1.item() == 9
 
 
 def test_build_user_mapping_contiguous():

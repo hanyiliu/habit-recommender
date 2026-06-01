@@ -35,7 +35,7 @@ class Trainer:
             raise ValueError("train_loader is empty — check your dataset and split configuration")
         self.model.train()
         total = 0.0
-        for context, user_ids, targets, routine_targets in self.train_loader:
+        for context, targets, user_ids, routine_targets in self.train_loader:
             context         = context.to(self.device)
             user_ids        = user_ids.to(self.device)
             targets         = targets.to(self.device)
@@ -54,7 +54,7 @@ class Trainer:
             raise ValueError("val_loader is empty — check your dataset and split configuration")
         self.model.eval()
         total = 0.0
-        for context, user_ids, targets, routine_targets in self.val_loader:
+        for context, targets, user_ids, routine_targets in self.val_loader:
             context         = context.to(self.device)
             user_ids        = user_ids.to(self.device)
             targets         = targets.to(self.device)

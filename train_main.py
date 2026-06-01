@@ -8,7 +8,6 @@ Usage:
     python train_main.py --model gru4rec --device cuda
 """
 import argparse
-import pickle
 import random
 from pathlib import Path
 
@@ -16,8 +15,13 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from src.data.dataset import ATUSDataset, build_user_mapping, train_val_test_split
-from src.eval.torch_metrics import evaluate_model
+from src.data.preprocessing.dataset import (
+    HabitDataset,
+    build_user_mapping,
+    train_val_test_split,
+)
+from src.data.preprocessing.preprocessor import load_sequences
+from src.eval.evaluation import evaluate_ranking
 from src.models.gru4rec import GRU4Rec
 from src.scoring.scoring import build_routines
 from src.training.train import Trainer
@@ -45,6 +49,29 @@ def _load_model_class(name: str):
                 "See docs/superpowers/plans/2026-05-26-ablation-models.md."
             ) from None
     raise ValueError(f"Unknown model: {name}")
+
+
+def _build_dataset(split, user_to_idx, routines, window):
+    """Stack a {user -> sequence} split into a HabitDataset with global user ids."""
+    arr = np.stack([split[uid] for uid in split])
+    uids = np.array([user_to_idx[uid] for uid in split], dtype=np.int64)
+    return HabitDataset(arr, window_size=window, routines=routines, user_ids=uids)
+
+
+@torch.no_grad()
+def evaluate_model(model, loader, device: str = "cpu") -> dict:
+    """Collect predictions over a loader and score them with src.eval.evaluation."""
+    model.eval()
+    all_logits, all_targets = [], []
+    for context, targets, user_ids, _ in loader:
+        logits = model(context.to(device), user_ids.to(device)).cpu()
+        all_logits.append(logits)
+        all_targets.append(targets)
+    if not all_logits:
+        return {}
+    logits = torch.cat(all_logits).numpy()
+    targets = torch.cat(all_targets).numpy()
+    return evaluate_ranking(targets, logits, ks=(1, 5))
 
 
 def build_args() -> argparse.Namespace:
@@ -83,7 +110,7 @@ def main():
             f"Sequences file not found: {seq_path}\n"
             "Run 'python preprocess.py' first to generate it."
         )
-    sequences = pickle.loads(seq_path.read_bytes())
+    sequences = load_sequences(seq_path)
 
     train_seqs, val_seqs, test_seqs = train_val_test_split(
         sequences,
@@ -93,15 +120,15 @@ def main():
     )
     print(f"Split: {len(train_seqs)} train / {len(val_seqs)} val / {len(test_seqs)} test users")
 
-    train_arr = np.stack([train_seqs[uid] for uid in train_seqs]).astype(float)
+    train_arr = np.stack([train_seqs[uid] for uid in train_seqs])
     routines, _, _ = build_routines(train_arr, K=args.k_routines, random_state=args.seed)
     print(f"Built {len(routines)} routines from training data")
 
     user_to_idx = build_user_mapping(sequences)
 
-    train_ds = ATUSDataset(train_seqs, user_to_idx, routines, window_size=args.window)
-    val_ds   = ATUSDataset(val_seqs,   user_to_idx, routines, window_size=args.window)
-    test_ds  = ATUSDataset(test_seqs,  user_to_idx, routines, window_size=args.window)
+    train_ds = _build_dataset(train_seqs, user_to_idx, routines, args.window)
+    val_ds   = _build_dataset(val_seqs,   user_to_idx, routines, args.window)
+    test_ds  = _build_dataset(test_seqs,  user_to_idx, routines, args.window)
     print(f"Dataset sizes: {len(train_ds)} train / {len(val_ds)} val / {len(test_ds)} test examples")
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,  num_workers=0)
@@ -123,7 +150,10 @@ def main():
     trainer.fit(args.epochs, checkpoint_path=args.checkpoint)
 
     metrics = evaluate_model(trainer.model, test_loader, device=args.device)
-    print(f"\nTest metrics | hit@1: {metrics['hit@1']:.4f} | hit@5: {metrics['hit@5']:.4f} | MRR: {metrics['mrr']:.4f}")
+    print(
+        f"\nTest metrics | accuracy: {metrics['accuracy']:.4f} | "
+        f"hit_rate@5: {metrics['hit_rate@5']:.4f} | ndcg@5: {metrics['ndcg@5']:.4f}"
+    )
 
 
 if __name__ == "__main__":

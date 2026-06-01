@@ -7,11 +7,12 @@ from src.training.train import Trainer
 
 
 def _make_toy_loader(n: int = 16, T: int = 8, n_users: int = 5) -> DataLoader:
+    # Tuple order matches HabitDataset: (context, target, user_id, routine_target)
     context         = torch.randint(0, 11, (n, T))
-    user_ids        = torch.randint(0, n_users, (n,))
     targets         = torch.randint(0, 11, (n,))
+    user_ids        = torch.randint(0, n_users, (n,))
     routine_targets = torch.randint(0, 11, (n,))
-    ds = TensorDataset(context, user_ids, targets, routine_targets)
+    ds = TensorDataset(context, targets, user_ids, routine_targets)
     return DataLoader(ds, batch_size=4)
 
 
