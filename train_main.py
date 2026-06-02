@@ -22,33 +22,9 @@ from src.data.preprocessing.dataset import (
 )
 from src.data.preprocessing.preprocessor import load_sequences
 from src.eval.evaluation import evaluate_ranking
-from src.models.gru4rec import GRU4Rec
+from src.models.registry import get_model_class, SUPPORTED_MODELS
 from src.scoring.scoring import build_routines
 from src.training.train import Trainer
-
-
-def _load_model_class(name: str):
-    if name == "gru4rec":
-        return GRU4Rec
-    if name == "lstm":
-        try:
-            from src.models.lstm_rec import LSTMRec
-            return LSTMRec
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError(
-                "LSTMRec is not yet implemented. "
-                "See docs/superpowers/plans/2026-05-26-ablation-models.md."
-            ) from None
-    if name == "transformer":
-        try:
-            from src.models.transformer_rec import TransformerRec
-            return TransformerRec
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError(
-                "TransformerRec is not yet implemented. "
-                "See docs/superpowers/plans/2026-05-26-ablation-models.md."
-            ) from None
-    raise ValueError(f"Unknown model: {name}")
 
 
 def _build_dataset(split, user_to_idx, routines, window):
@@ -78,7 +54,7 @@ def build_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train habit-recommender model")
     p.add_argument("--sequences",  default="data/processed/sequences.pkl",
                    help="Path to preprocessed sequences pickle")
-    p.add_argument("--model",      choices=["gru4rec", "lstm", "transformer"],
+    p.add_argument("--model",      choices=list(SUPPORTED_MODELS),
                    default="gru4rec")
     p.add_argument("--epochs",     type=int,   default=50)
     p.add_argument("--batch-size", type=int,   default=256)
@@ -135,10 +111,20 @@ def main():
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False, num_workers=0)
     test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False, num_workers=0)
 
-    ModelClass = _load_model_class(args.model)
+    ModelClass = get_model_class(args.model)
     model = ModelClass(n_users=len(sequences))
     print(f"Model: {ModelClass.__name__} | params: {sum(p.numel() for p in model.parameters()):,}")
 
+    config = {
+        "model":        args.model,
+        "model_kwargs": {"n_users": len(sequences)},  # only non-default ctor arg today
+        "window":       args.window,
+        "val_frac":     args.val_frac,
+        "test_frac":    args.test_frac,
+        "seed":         args.seed,
+        "k_routines":   args.k_routines,
+        "n_classes":    11,
+    }
     trainer = Trainer(
         model,
         train_loader,
@@ -146,6 +132,7 @@ def main():
         lr=args.lr,
         lambda_kl=args.lambda_kl,
         device=args.device,
+        config=config,
     )
     trainer.fit(args.epochs, checkpoint_path=args.checkpoint)
 

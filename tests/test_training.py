@@ -69,3 +69,16 @@ def test_fit_with_lambda_kl_zero(tmp_path):
     trainer = Trainer(model, loader, loader, lambda_kl=0.0)
     history = trainer.fit(n_epochs=1, checkpoint_path=ckpt)
     assert history[0]["train_loss"] > 0
+
+
+def test_fit_saves_config(tmp_path):
+    model  = GRU4Rec(n_users=5)
+    loader = _make_toy_loader()
+    ckpt   = str(tmp_path / "best.pt")
+    cfg    = {"model": "gru4rec", "model_kwargs": {"n_users": 5}, "window": 8,
+              "val_frac": 0.15, "test_frac": 0.15, "seed": 42,
+              "k_routines": 10, "n_classes": 11}
+    trainer = Trainer(model, loader, loader, config=cfg)
+    trainer.fit(n_epochs=1, checkpoint_path=ckpt)
+    saved = torch.load(ckpt, weights_only=False)
+    assert saved["config"] == cfg
