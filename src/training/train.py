@@ -18,12 +18,14 @@ class Trainer:
         lr: float = 1e-3,
         lambda_kl: float = 0.5,
         device: str = "cpu",
+        config: dict | None = None,
     ):
         self.model        = model.to(device)
         self.train_loader = train_loader
         self.val_loader   = val_loader
         self.lambda_kl    = lambda_kl
         self.device       = device
+        self.config       = config
         self.optimizer    = torch.optim.Adam(model.parameters(), lr=lr)
         self.scheduler    = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", patience=5, factor=0.5
@@ -87,6 +89,7 @@ class Trainer:
                         "optimizer_state":  self.optimizer.state_dict(),
                         "scheduler_state":  self.scheduler.state_dict(),
                         "val_loss":         val_loss,
+                        "config":           self.config,
                     },
                     checkpoint_path,
                 )

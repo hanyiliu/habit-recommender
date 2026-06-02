@@ -115,6 +115,16 @@ def main():
     model = ModelClass(n_users=len(sequences))
     print(f"Model: {ModelClass.__name__} | params: {sum(p.numel() for p in model.parameters()):,}")
 
+    config = {
+        "model":        args.model,
+        "model_kwargs": {"n_users": len(sequences)},  # only non-default ctor arg today
+        "window":       args.window,
+        "val_frac":     args.val_frac,
+        "test_frac":    args.test_frac,
+        "seed":         args.seed,
+        "k_routines":   args.k_routines,
+        "n_classes":    11,
+    }
     trainer = Trainer(
         model,
         train_loader,
@@ -122,6 +132,7 @@ def main():
         lr=args.lr,
         lambda_kl=args.lambda_kl,
         device=args.device,
+        config=config,
     )
     trainer.fit(args.epochs, checkpoint_path=args.checkpoint)
 
