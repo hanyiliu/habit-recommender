@@ -65,8 +65,8 @@ def build_args() -> argparse.Namespace:
                    help="Number of K-means clusters for routine building")
     p.add_argument("--window",     type=int,   default=24,
                    help="Sliding-window context size (slots)")
-    p.add_argument("--val-frac",   type=float, default=0.15)
-    p.add_argument("--test-frac",  type=float, default=0.15)
+    p.add_argument("--val-frac",   type=float, default=0.10)
+    p.add_argument("--test-frac",  type=float, default=0.10)
     p.add_argument("--seed",       type=int,   default=42)
     p.add_argument("--checkpoint", default="checkpoints/best.pt")
     p.add_argument("--device",     default="cpu")

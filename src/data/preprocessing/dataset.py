@@ -96,8 +96,8 @@ def build_user_mapping(sequences: dict) -> dict:
 
 def train_val_test_split(
     sequences: dict,
-    val_frac: float = 0.15,
-    test_frac: float = 0.15,
+    val_frac: float = 0.10,
+    test_frac: float = 0.10,
     seed: int = 42,
 ) -> tuple:
     """Split a {respondent_id -> sequence} dict by user into train/val/test dicts."""
