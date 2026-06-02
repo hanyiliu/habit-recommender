@@ -134,7 +134,7 @@ Honest status of what does **not** yet work:
 habit-recommender/
 ├── preprocess.py              # entry point: raw .dat -> sequences.pkl
 ├── train_main.py              # entry point: train GRU4Rec, print metrics
-├── evaluate.py                # entry point: score predictions.npz (see gaps)
+├── evaluate.py                # entry point: score predictions_<model>.npz
 ├── requirements.txt
 ├── data/
 │   ├── 2024_data/             # raw ATUS files (atusact_2024.dat)
@@ -144,7 +144,7 @@ habit-recommender/
 │   ├── models/                # GRU4Rec, loss functions, model utils
 │   ├── training/              # Trainer (training loop)
 │   ├── scoring/               # K-means routine building + routine scoring
-│   ├── eval/                  # ranking + sequence evaluation metrics
+│   ├── eval/                  # ranking + sequence metrics; predict/ (checkpoint -> predictions.npz)
 │   ├── analysis/              # visualization / plotting helpers
 │   └── utils/                 # activity category mapping
 ├── examples/                  # evaluation_demo.py + demo_outputs/
