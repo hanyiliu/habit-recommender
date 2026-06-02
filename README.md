@@ -30,6 +30,15 @@ pip install -r requirements.txt --extra-index-url https://download.pytorch.org/w
 
 ## Pipeline
 
+End-to-end runnable flow:
+
+```bash
+python preprocess.py
+python train_main.py --epochs 5
+python -m src.eval.predict.gru4rec --checkpoint checkpoints/best.pt
+python evaluate.py --predictions data/processed/predictions_gru4rec.npz
+```
+
 ### 1. Preprocess the raw ATUS data
 
 ```bash
@@ -69,7 +78,31 @@ python train_main.py \
 > not yet implemented (they raise a clear `ModuleNotFoundError`). See
 > `docs/superpowers/plans/2026-05-26-ablation-models.md`.
 
-### 3. Evaluation / visualization demo (synthetic data)
+### 3. Predict (run checkpoint over the held-out test split)
+
+```bash
+python -m src.eval.predict.gru4rec --checkpoint checkpoints/best.pt
+```
+
+Loads the trained checkpoint, runs it over the held-out test split, and writes
+`data/processed/predictions_gru4rec.npz` — an array bundle containing
+`y_true`, `y_scores`, `time_slots`, and `user_ids` that `evaluate.py` scores.
+The checkpoint is self-describing (it carries its model architecture and the
+split configuration used during training), so no extra flags need to be
+re-specified.
+
+Other available flags (defaults shown):
+
+```bash
+python -m src.eval.predict.gru4rec \
+    --checkpoint checkpoints/best.pt \
+    --sequences  data/processed/sequences.pkl \
+    --out        data/processed/predictions_<model>.npz \
+    --batch-size 256 \
+    --device     cpu
+```
+
+### 4. Evaluation / visualization demo (synthetic data)
 
 ```bash
 PYTHONPATH=. python examples/evaluation_demo.py
@@ -81,18 +114,16 @@ data** (no trained model or real data required) and writes PNGs to
 
 ## Known gaps / roadmap
 
-This branch (`bridge-train-analysis`) is wiring up the train -> analysis
-hand-off. Honest status of what does **not** yet work:
+Honest status of what does **not** yet work:
 
-- **train -> analysis bridge (in progress):** `evaluate.py` expects
-  `data/processed/predictions.npz` containing `y_true` (shape `(N,)`) and
-  `y_scores` (shape `(N, 11)`). The training step does **not** yet emit this
-  file, so `evaluate.py` currently prints a "missing artifact" pointer instead
-  of real metrics. Bridging that handoff is the focus of this branch.
-- **LSTM / Transformer ablations:** not implemented (see plan doc above).
-- **Full-day autoregressive rollout:** sequence-level metrics
+- **LSTM / Transformer ablations:** `--model lstm` and `--model transformer`
+  are planned but not yet implemented (they raise a clear
+  `ModuleNotFoundError`). See
+  `docs/superpowers/plans/2026-05-26-ablation-models.md`.
+- **Full-day autoregressive rollout (Regime B):** sequence-level metrics
   (`sequence_match`, `routine_similarity`, `deviation_reduction`) exist in
-  `src/eval/evaluation.py` but are not yet fed by a real model rollout.
+  `src/eval/evaluation.py` but are not yet fed by a real full-day rollout; a
+  proper autoregressive rollout is needed for these sequence-level scores.
 - **Requirements pinning:** `requirements.txt` uses conservative lower bounds
   only; exact pins / a lockfile are a follow-up.
 - **CI:** no continuous integration configured yet.
