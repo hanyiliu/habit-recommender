@@ -7,6 +7,7 @@
 
 import numpy as np
 from sklearn.cluster import KMeans
+from threadpoolctl import threadpool_limits
 
 # Indices match activity_map.py CATEGORIES ordering exactly
 SLEEP, GROOMING, WORK, EDUCATION, EATING = 0, 1, 2, 3, 4
@@ -158,8 +159,15 @@ def build_routines(sequences, K, threshold=0.5, min_cluster_size=30,
     """
     sequences = np.asarray(sequences, dtype=int)
 
+    # Pin K-means to a single OpenMP thread. When this runs in the same process
+    # as PyTorch (as in train_main.py / predict), torch's bundled LLVM libomp and
+    # numpy/sklearn's Intel libiomp5 collide: the second runtime's
+    # pthread_mutex_init fails ("OMP: Error #179") and the process hangs in an
+    # uninterruptible state. threadpool_limits scopes the limit to this call only,
+    # so torch training elsewhere keeps all its threads.
     kmeans = KMeans(n_clusters=K, n_init=10, random_state=random_state)
-    labels = kmeans.fit_predict(sequences.astype(float)).copy()
+    with threadpool_limits(limits=1):
+        labels = kmeans.fit_predict(sequences.astype(float)).copy()
     centroids = kmeans.cluster_centers_
 
     scores = np.array([compute_health_score(seq, weights) for seq in sequences])
