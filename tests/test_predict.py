@@ -45,6 +45,7 @@ def test_run_ranking_predictions_deterministic():
     assert np.array_equal(a["y_true"], b["y_true"])
     assert np.array_equal(a["time_slots"], b["time_slots"])
     assert np.array_equal(a["user_ids"], b["user_ids"])
+    assert np.array_equal(a["y_scores"], b["y_scores"])
 
 
 def test_save_predictions_roundtrip(tmp_path):

@@ -14,7 +14,11 @@ from src.models.registry import get_model_class
 
 
 def load_checkpoint(checkpoint_path: str) -> dict:
-    """Load a checkpoint and require it to be self-describing (has 'config')."""
+    """Load a checkpoint and require it to be self-describing (has 'config').
+
+    Uses weights_only=False because checkpoints store a plain-dict 'config'.
+    Only load checkpoints you trust — pickle can execute arbitrary code.
+    """
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if ckpt.get("config") is None:
         raise ValueError(
@@ -40,10 +44,18 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
         sequences, val_frac=config["val_frac"],
         test_frac=config["test_frac"], seed=config["seed"],
     )
+    if not test_seqs:
+        raise ValueError(
+            f"Test split is empty (test_frac={config['test_frac']}, "
+            f"n_users={len(sequences)}). Increase test_frac or use more users."
+        )
     user_to_idx = build_user_mapping(sequences)
 
-    arr = np.stack([test_seqs[k] for k in test_seqs])
-    uids = np.array([user_to_idx[k] for k in test_seqs], dtype=np.int64)
+    # Bind the key order once so arr and uids are aligned independent of any
+    # later dict mutation.
+    test_keys = list(test_seqs.keys())
+    arr = np.stack([test_seqs[k] for k in test_keys])
+    uids = np.array([user_to_idx[k] for k in test_keys], dtype=np.int64)
     ds = HabitDataset(arr, window_size=window, user_ids=uids)  # 3-tuple (x, y, user_id)
     loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
 
@@ -71,6 +83,11 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
 
 
 def save_predictions(arrays: dict, out_path: str, model_name: str) -> None:
+    """Serialize prediction arrays to a .npz, tagging it with the source model name.
+
+    model_name is stored as a metadata scalar so downstream consumers can
+    identify which model produced the file.
+    """
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez(out, model=np.array(model_name), **arrays)
@@ -86,12 +103,22 @@ def predict_from_checkpoint(checkpoint_path: str, sequences_path: str,
     model_name = config["model"]
 
     model = get_model_class(model_name)(**config["model_kwargs"])
-    model.load_state_dict(ckpt["model_state"])
+    try:
+        model.load_state_dict(ckpt["model_state"])
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"State dict does not match the model built from config {config}. "
+            "The checkpoint may have been trained with a different architecture. "
+            f"Original error: {exc}"
+        ) from exc
 
     sequences = load_sequences(sequences_path)
     arrays = run_ranking_predictions(
         model, sequences, config, batch_size=batch_size, device=device,
     )
     out_path = out_path or f"data/processed/predictions_{model_name}.npz"
+    # np.savez appends .npz when missing; keep the returned path consistent.
+    if not out_path.endswith(".npz"):
+        out_path = out_path + ".npz"
     save_predictions(arrays, out_path, model_name)
     return out_path
