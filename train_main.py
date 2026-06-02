@@ -22,33 +22,9 @@ from src.data.preprocessing.dataset import (
 )
 from src.data.preprocessing.preprocessor import load_sequences
 from src.eval.evaluation import evaluate_ranking
-from src.models.gru4rec import GRU4Rec
+from src.models.registry import get_model_class
 from src.scoring.scoring import build_routines
 from src.training.train import Trainer
-
-
-def _load_model_class(name: str):
-    if name == "gru4rec":
-        return GRU4Rec
-    if name == "lstm":
-        try:
-            from src.models.lstm_rec import LSTMRec
-            return LSTMRec
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError(
-                "LSTMRec is not yet implemented. "
-                "See docs/superpowers/plans/2026-05-26-ablation-models.md."
-            ) from None
-    if name == "transformer":
-        try:
-            from src.models.transformer_rec import TransformerRec
-            return TransformerRec
-        except ModuleNotFoundError:
-            raise ModuleNotFoundError(
-                "TransformerRec is not yet implemented. "
-                "See docs/superpowers/plans/2026-05-26-ablation-models.md."
-            ) from None
-    raise ValueError(f"Unknown model: {name}")
 
 
 def _build_dataset(split, user_to_idx, routines, window):
@@ -135,7 +111,7 @@ def main():
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False, num_workers=0)
     test_loader  = DataLoader(test_ds,  batch_size=args.batch_size, shuffle=False, num_workers=0)
 
-    ModelClass = _load_model_class(args.model)
+    ModelClass = get_model_class(args.model)
     model = ModelClass(n_users=len(sequences))
     print(f"Model: {ModelClass.__name__} | params: {sum(p.numel() for p in model.parameters()):,}")
 
