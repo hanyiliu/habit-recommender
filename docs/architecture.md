@@ -198,6 +198,9 @@ What is built vs. what is still planned, so the spec stays honest.
   K × threshold sweep.
 - GRU4Rec (64/64 → 128 → 128 → 11), BPR + λ·KL loss, λ=0 ablation, user-ID
   personalization, Hamming template matching.
+- LSTM / Transformer ablation models (`LSTMRec`, `TransformerRec`), sharing
+  GRU4Rec's `forward(sequences, user_ids) -> (B, 11)` interface and resolved via
+  the shared registry (`--model lstm` / `--model transformer`).
 - 80/10/10 split (**aligned in this change**).
 - All evaluation metric *definitions* (ranking, sequence, behavioral).
 - Train → analysis ranking handoff: checkpoint → `predictions_<model>.npz` →
@@ -214,10 +217,7 @@ What is built vs. what is still planned, so the spec stays honest.
 3. **Sparse-respondent filtering.** Respondents with many unfilled slots are
    currently kept (gaps default to `Other`); a min-filled-slots filter in
    preprocessing is a possible future addition.
-4. **LSTM / Transformer ablations.** Not yet implemented — `get_model_class`
-   raises a clear `ModuleNotFoundError` for `lstm` / `transformer`. Build spec:
-   `docs/superpowers/plans/2026-05-26-ablation-models.md`.
-5. **Sequence-level evaluation end-to-end (Regime B).** The sequence/behavioral
+4. **Sequence-level evaluation end-to-end (Regime B).** The sequence/behavioral
    metrics exist but are not yet fed by a real **autoregressive full-day
    rollout**, and `evaluate.py`'s sequence path handles a single day rather than
    a population. Design: `docs/superpowers/plans/2026-06-02-train-analysis-bridge.md`

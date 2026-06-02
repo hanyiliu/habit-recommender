@@ -74,8 +74,9 @@ python train_main.py \
     --checkpoint checkpoints/best.pt
 ```
 
-> `--model lstm` and `--model transformer` are **planned ablations** and are
-> not yet implemented (they raise a clear `ModuleNotFoundError`). See
+> `--model lstm` and `--model transformer` are implemented ablations sharing
+> GRU4Rec's interface (`LSTMRec` swaps the GRU cell for an LSTM; `TransformerRec`
+> uses a single-head causal Transformer encoder). See
 > `docs/superpowers/plans/2026-05-26-ablation-models.md`.
 
 ### 3. Predict (run checkpoint over the held-out test split)
@@ -120,10 +121,6 @@ data** (no trained model or real data required) and writes PNGs to
 
 Honest status of what does **not** yet work:
 
-- **LSTM / Transformer ablations:** `--model lstm` and `--model transformer`
-  are planned but not yet implemented (they raise a clear
-  `ModuleNotFoundError`). See
-  `docs/superpowers/plans/2026-05-26-ablation-models.md`.
 - **Full-day autoregressive rollout (Regime B):** sequence-level metrics
   (`sequence_match`, `routine_similarity`, `deviation_reduction`) exist in
   `src/eval/evaluation.py` but are not yet fed by a real full-day rollout; a
