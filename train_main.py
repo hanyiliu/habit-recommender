@@ -22,7 +22,7 @@ from src.data.preprocessing.dataset import (
 )
 from src.data.preprocessing.preprocessor import load_sequences
 from src.eval.evaluation import evaluate_ranking
-from src.models.registry import get_model_class
+from src.models.registry import get_model_class, SUPPORTED_MODELS
 from src.scoring.scoring import build_routines
 from src.training.train import Trainer
 
@@ -54,7 +54,7 @@ def build_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train habit-recommender model")
     p.add_argument("--sequences",  default="data/processed/sequences.pkl",
                    help="Path to preprocessed sequences pickle")
-    p.add_argument("--model",      choices=["gru4rec", "lstm", "transformer"],
+    p.add_argument("--model",      choices=list(SUPPORTED_MODELS),
                    default="gru4rec")
     p.add_argument("--epochs",     type=int,   default=50)
     p.add_argument("--batch-size", type=int,   default=256)
