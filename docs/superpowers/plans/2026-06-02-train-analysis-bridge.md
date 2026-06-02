@@ -1,60 +1,76 @@
-# Train → Analysis Bridge Implementation Plan
+# Train → Analysis Bridge (Phase A: Ranking Handoff) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Close the gap between training and the analysis stage. Today `train_main.py` trains a model and prints test metrics but persists nothing for analysis, while `evaluate.py` expects an on-disk `predictions.npz` it never receives. This plan produces that artifact via a dedicated, ablation-aware prediction stage.
+**Goal:** Make a trained checkpoint produce a `data/processed/predictions_<model>.npz` that `evaluate.py` already knows how to read, so the `preprocess → train → predict → evaluate` pipeline runs end-to-end for next-activity (ranking) metrics.
 
-**Tech Stack:** Python 3.10+, PyTorch 2.x, NumPy.
+**Architecture:** A dedicated, model-agnostic prediction stage under `src/eval/predict/` (a shared `runner.py` core + a thin per-model CLI entry) loads a self-describing checkpoint, rebuilds the model, reconstructs the exact deterministic test split, runs forward inference, and serializes the flat `y_true / y_scores / time_slots / user_ids` arrays. Checkpoints become self-describing by having `Trainer.fit` store a `config` dict. Model-class lookup moves into a shared `src/models/registry.py` used by both training and prediction.
 
----
+**Tech Stack:** Python 3.10+, PyTorch 2.x, NumPy. (Sequence-level "Regime B" metrics — autoregressive rollout, per-user routine templates, population aggregation — are intentionally **out of scope** here and tracked as a separate future plan; see the final section.)
 
-## Background: why the bridge has two regimes
-
-`evaluate.py` / `src/eval/evaluation.py` support **two distinct evaluation regimes** with very different costs:
-
-- **Regime A — ranking / next-activity** (`evaluate_ranking`, `per_class_accuracy`): needs flat per-example arrays `y_true (N,)`, `y_scores (N, 11)`, optional `time_slots (N,)`, `user_ids (N,)`. These come directly from running the trained model over the test set — one prediction per sliding-window example. `train_main.evaluate_model` already computes the logits and discards them.
-- **Regime B — sequence / routine** (`sequence_match_score`, `routine_similarity_score`, `deviation_reduction`): needs full 48-slot **day** sequences (`pred_sequence`, `original_sequence`, `template_sequence`). This requires autoregressive rollout (the model predicts one slot at a time) plus per-user routine templates, and `evaluate.py`'s sequence path currently only handles a *single* day, not a population.
-
-**This plan implements Regime A now (Phase A) and specs Regime B as a documented follow-up (Phase B).**
-
-## Design decisions (locked)
-
-1. **Phased**: Phase A (ranking handoff) ships first and yields a working E2E `preprocess → train → predict → evaluate` run. Phase B (rollout + sequence metrics) is designed here but implemented later.
-2. **Dedicated prediction stage** under `src/eval/predict/`, **not** inline in `train_main.py` — decouples inference from training so predictions can be regenerated for any checkpoint without retraining.
-3. **Shared core + thin per-model entry points**: all rec models share the identical `forward(sequences, user_ids) -> (B, 11)` signature, so the inference loop (and later the rollout loop) lives once in `runner.py`; each model gets a ~10-line CLI entry. Ablation models (LSTMRec, TransformerRec) drop in cleanly.
-4. **Self-describing checkpoints**: `Trainer.fit` stores a `config` dict (model name + constructor kwargs + data/split params + window) in the checkpoint so `predict` rebuilds the architecture and reproduces the exact test split with no guessing and no re-typed flags.
-5. **Per-model output**: each entry writes `data/processed/predictions_<model>.npz` so ablation runs don't clobber each other; `evaluate.py --predictions …` points at the chosen file.
+> **Environment note for the executor:** All tests require PyTorch. Run `pip install -r requirements.txt` first. The doc-authoring sandbox could not install torch, so these tests have not been executed here — run them in a torch-capable environment.
 
 ---
 
-## File Map
+## File Structure
 
-| File | Responsibility | Phase |
-|---|---|---|
-| `src/models/registry.py` | `get_model_class(name)` — single model registry shared by train + predict | A |
-| `src/training/train.py` | `Trainer.fit` saves a `config` dict into the checkpoint | A |
-| `train_main.py` | builds + passes `config`; uses the shared registry | A |
-| `src/eval/predict/__init__.py` | package marker | A |
-| `src/eval/predict/runner.py` | `run_ranking_predictions(...)`, `save_predictions(...)`, `load_checkpoint_config(...)` (model-agnostic) | A |
-| `src/eval/predict/gru4rec.py` | thin CLI entry: rebuild GRU4Rec from checkpoint, call runner, save npz | A |
-| `tests/test_predict.py` | runner shape/determinism + checkpoint-config round-trip tests | A |
-| `src/eval/predict/runner.py` (+`rollout`) | autoregressive full-day rollout; per-user templates | B |
-| `src/eval/evaluation.py` | batched sequence metrics over a population | B |
-| `src/eval/predict/{lstm,transformer}.py` | thin entries for ablation models | B (after models exist) |
+| File | Responsibility |
+|---|---|
+| `src/models/registry.py` (create) | `get_model_class(name)` — the single name→class lookup, shared by train + predict |
+| `train_main.py` (modify) | use the shared registry; build and pass a `config` dict to `Trainer` |
+| `src/training/train.py` (modify) | `Trainer` accepts `config` and stores it in the checkpoint |
+| `src/eval/predict/__init__.py` (create) | package marker (empty) |
+| `src/eval/predict/runner.py` (create) | model-agnostic core: load checkpoint, run inference, save npz, orchestrate |
+| `src/eval/predict/gru4rec.py` (create) | thin CLI entry: `python -m src.eval.predict.gru4rec` |
+| `tests/test_registry.py` (create) | registry lookup behavior |
+| `tests/test_training.py` (modify) | checkpoint now carries `config` |
+| `tests/test_predict.py` (create) | runner shapes/determinism + checkpoint round-trip |
+| `README.md` (modify) | document the `predict` step in the E2E flow |
+
+Decomposition rationale: all rec models share `forward(sequences, user_ids) -> (B, n_activities)`, so the inference loop belongs in one place (`runner.py`); per-model files exist only as discoverable entry points and stay ~15 lines. The registry is extracted so training and prediction never drift on how a model name resolves.
 
 ---
 
-## Phase A — Ranking handoff
-
-### Task 1: Shared model registry
-
-Extract model lookup out of `train_main.py` so both training and prediction resolve model classes the same way (and ablation models register in one place).
+## Task 1: Shared model registry
 
 **Files:**
 - Create: `src/models/registry.py`
-- Edit: `train_main.py`
+- Create: `tests/test_registry.py`
+- Modify: `train_main.py` (remove local `_load_model_class`, import the shared one)
 
-- [ ] **Step 1: Create the registry**
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_registry.py
+import pytest
+
+from src.models.registry import get_model_class
+from src.models.gru4rec import GRU4Rec
+
+
+def test_get_model_class_gru4rec():
+    assert get_model_class("gru4rec") is GRU4Rec
+
+
+def test_unknown_model_raises_value_error():
+    with pytest.raises(ValueError, match="Unknown model"):
+        get_model_class("nope")
+
+
+def test_unimplemented_ablation_raises_module_not_found():
+    # LSTMRec / TransformerRec are planned but not yet implemented.
+    with pytest.raises(ModuleNotFoundError, match="not yet implemented"):
+        get_model_class("lstm")
+    with pytest.raises(ModuleNotFoundError, match="not yet implemented"):
+        get_model_class("transformer")
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_registry.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'src.models.registry'`
+
+- [ ] **Step 3: Write minimal implementation**
 
 ```python
 # src/models/registry.py
@@ -86,49 +102,251 @@ def get_model_class(name: str):
     raise ValueError(f"Unknown model: {name}")
 ```
 
-- [ ] **Step 2:** In `train_main.py`, delete the local `_load_model_class` and import `get_model_class` from `src.models.registry`; replace the call site.
+- [ ] **Step 4: Run test to verify it passes**
 
-- [ ] **Step 3: Commit** — `refactor: extract shared model registry`
+Run: `pytest tests/test_registry.py -v`
+Expected: PASS (3 passed)
 
-### Task 2: Self-describing checkpoints
+- [ ] **Step 5: Refactor train_main.py to use the registry**
 
-**Files:**
-- Edit: `src/training/train.py`
-- Edit: `train_main.py`
+In `train_main.py`, delete the entire `_load_model_class` function. Replace its import block and call site:
 
-- [ ] **Step 1:** Add an optional `config: dict | None = None` parameter to `Trainer.__init__` (store as `self.config`). In `fit`, include it in the saved checkpoint dict as `"config": self.config`. Leave all existing keys intact (backward compatible — existing tests that don't pass a config still pass, the key is just `None`).
-
-- [ ] **Step 2:** In `train_main.main`, build the config after parsing args and constructing the model, and pass it to `Trainer`:
-
+Remove:
 ```python
-config = {
-    "model": args.model,
-    "model_kwargs": {"n_users": len(sequences)},  # only non-default ctor arg today
-    "window": args.window,
-    "val_frac": args.val_frac,
-    "test_frac": args.test_frac,
-    "seed": args.seed,
-    "k_routines": args.k_routines,
-    "n_classes": 11,
-}
-trainer = Trainer(model, train_loader, val_loader, lr=args.lr,
-                  lambda_kl=args.lambda_kl, device=args.device, config=config)
+from src.models.gru4rec import GRU4Rec
+```
+Add (with the other `src...` imports):
+```python
+from src.models.registry import get_model_class
+```
+Change the call site in `main()` from:
+```python
+    ModelClass = _load_model_class(args.model)
+```
+to:
+```python
+    ModelClass = get_model_class(args.model)
 ```
 
-> Rationale: `predict` needs `model` + `model_kwargs` to rebuild the architecture and load `state_dict`, and `window`/`val_frac`/`test_frac`/`seed` to reproduce the **exact** test split deterministically.
+- [ ] **Step 6: Verify nothing else references the old function**
 
-- [ ] **Step 3:** Update `tests/test_training.py::test_fit_saves_checkpoint` to assert `"config" in saved`. Add a case passing a config and asserting round-trip equality.
+Run: `grep -rn "_load_model_class" .`
+Expected: no matches.
+Run: `python -c "import train_main"`
+Expected: no error.
 
-- [ ] **Step 4: Commit** — `feat: store model+split config in training checkpoint`
+- [ ] **Step 7: Commit**
 
-### Task 3: Prediction runner (shared core)
+```bash
+git add src/models/registry.py tests/test_registry.py train_main.py
+git commit -m "refactor: extract shared model registry"
+```
+
+---
+
+## Task 2: Self-describing checkpoints
+
+`Trainer.fit` currently saves `model_state / optimizer_state / scheduler_state / epoch / val_loss`. Add an optional `config` dict so the checkpoint records how to rebuild the model and reproduce the test split.
 
 **Files:**
-- Create: `src/eval/predict/__init__.py` (empty)
+- Modify: `src/training/train.py` (`Trainer.__init__`, `Trainer.fit`)
+- Modify: `train_main.py` (`main` builds and passes `config`)
+- Modify: `tests/test_training.py`
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `tests/test_training.py`:
+
+```python
+def test_fit_saves_config(tmp_path):
+    model  = GRU4Rec(n_users=5)
+    loader = _make_toy_loader()
+    ckpt   = str(tmp_path / "best.pt")
+    cfg    = {"model": "gru4rec", "model_kwargs": {"n_users": 5}, "window": 8,
+              "val_frac": 0.15, "test_frac": 0.15, "seed": 42,
+              "k_routines": 10, "n_classes": 11}
+    trainer = Trainer(model, loader, loader, config=cfg)
+    trainer.fit(n_epochs=1, checkpoint_path=ckpt)
+    saved = torch.load(ckpt, weights_only=False)
+    assert saved["config"] == cfg
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_training.py::test_fit_saves_config -v`
+Expected: FAIL — `TypeError: __init__() got an unexpected keyword argument 'config'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+In `src/training/train.py`, add `config` to `__init__` (place the new parameter last, after `device`):
+```python
+        device: str = "cpu",
+        config: dict | None = None,
+    ):
+```
+and store it (add alongside the other assignments in `__init__`):
+```python
+        self.config       = config
+```
+In `fit`, add `"config": self.config` to the saved checkpoint dict (alongside the existing keys):
+```python
+                torch.save(
+                    {
+                        "epoch":            epoch,
+                        "model_state":      self.model.state_dict(),
+                        "optimizer_state":  self.optimizer.state_dict(),
+                        "scheduler_state":  self.scheduler.state_dict(),
+                        "val_loss":         val_loss,
+                        "config":           self.config,
+                    },
+                    checkpoint_path,
+                )
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pytest tests/test_training.py -v`
+Expected: PASS (all existing training tests + `test_fit_saves_config`). Existing tests pass `config` implicitly as `None`, which is fine.
+
+- [ ] **Step 5: Build and pass config in train_main.py**
+
+In `train_main.py` `main()`, after the model is constructed (`model = ModelClass(...)`) and before `trainer = Trainer(...)`, insert:
+```python
+    config = {
+        "model":        args.model,
+        "model_kwargs": {"n_users": len(sequences)},  # only non-default ctor arg today
+        "window":       args.window,
+        "val_frac":     args.val_frac,
+        "test_frac":    args.test_frac,
+        "seed":         args.seed,
+        "k_routines":   args.k_routines,
+        "n_classes":    11,
+    }
+```
+Then add `config=config` to the `Trainer(...)` call (after `device=args.device`).
+
+- [ ] **Step 6: Verify train_main still imports**
+
+Run: `python -c "import train_main"`
+Expected: no error.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/training/train.py train_main.py tests/test_training.py
+git commit -m "feat: store model+split config in training checkpoint"
+```
+
+---
+
+## Task 3: Prediction runner (model-agnostic core)
+
+**Files:**
+- Create: `src/eval/predict/__init__.py` (empty file)
 - Create: `src/eval/predict/runner.py`
+- Create: `tests/test_predict.py`
 
-- [ ] **Step 1: Implement the runner.** It is fully model-agnostic — it takes an already-constructed model and the config, rebuilds the deterministic test split, runs forward over it with `shuffle=False`, and returns the Regime-A arrays.
+- [ ] **Step 1: Write the failing test**
 
+```python
+# tests/test_predict.py
+import numpy as np
+import pytest
+import torch
+
+from src.models.gru4rec import GRU4Rec
+from src.eval.predict.runner import (
+    run_ranking_predictions, save_predictions, load_checkpoint,
+    predict_from_checkpoint,
+)
+
+
+def _fake_sequences(n: int = 20, seed: int = 0) -> dict:
+    rng = np.random.default_rng(seed)
+    return {i: rng.integers(0, 11, size=48, dtype=np.int8) for i in range(n)}
+
+
+def _config(n_users: int, window: int = 24) -> dict:
+    return {"model": "gru4rec", "model_kwargs": {"n_users": n_users},
+            "window": window, "val_frac": 0.15, "test_frac": 0.15,
+            "seed": 42, "k_routines": 10, "n_classes": 11}
+
+
+def test_run_ranking_predictions_shapes_and_ranges():
+    seqs = _fake_sequences(20)
+    cfg = _config(len(seqs), window=24)
+    model = GRU4Rec(n_users=len(seqs))
+    out = run_ranking_predictions(model, seqs, cfg, batch_size=16)
+
+    assert set(out) == {"y_true", "y_scores", "time_slots", "user_ids"}
+    n = out["y_true"].shape[0]
+    # 3 test users (20 * 0.15) x (48 - 24) windows = 72
+    assert n == 3 * (48 - 24)
+    assert out["y_scores"].shape == (n, 11)
+    assert out["time_slots"].min() >= 24 and out["time_slots"].max() <= 47
+    assert out["user_ids"].min() >= 0 and out["user_ids"].max() < len(seqs)
+
+
+def test_run_ranking_predictions_deterministic():
+    seqs = _fake_sequences(20)
+    cfg = _config(len(seqs))
+    model = GRU4Rec(n_users=len(seqs))
+    a = run_ranking_predictions(model, seqs, cfg, batch_size=16)
+    b = run_ranking_predictions(model, seqs, cfg, batch_size=16)
+    assert np.array_equal(a["y_true"], b["y_true"])
+    assert np.array_equal(a["time_slots"], b["time_slots"])
+    assert np.array_equal(a["user_ids"], b["user_ids"])
+
+
+def test_save_predictions_roundtrip(tmp_path):
+    arrays = {"y_true": np.zeros(4, np.int64),
+              "y_scores": np.zeros((4, 11), np.float32),
+              "time_slots": np.arange(4, dtype=np.int64),
+              "user_ids": np.arange(4, dtype=np.int64)}
+    out = tmp_path / "p.npz"
+    save_predictions(arrays, str(out), "gru4rec")
+    with np.load(out) as d:
+        assert str(d["model"]) == "gru4rec"
+        assert d["y_scores"].shape == (4, 11)
+
+
+def test_load_checkpoint_requires_config(tmp_path):
+    ckpt = tmp_path / "bad.pt"
+    torch.save({"model_state": {}}, ckpt)  # no 'config'
+    with pytest.raises(ValueError, match="no 'config'"):
+        load_checkpoint(str(ckpt))
+
+
+def test_predict_from_checkpoint_end_to_end(tmp_path):
+    seqs = _fake_sequences(20)
+    import pickle
+    seq_path = tmp_path / "sequences.pkl"
+    seq_path.write_bytes(pickle.dumps(seqs))
+
+    model = GRU4Rec(n_users=len(seqs))
+    ckpt = tmp_path / "best.pt"
+    torch.save({"model_state": model.state_dict(),
+                "config": _config(len(seqs))}, ckpt)
+
+    out = tmp_path / "predictions_gru4rec.npz"
+    predict_from_checkpoint(str(ckpt), str(seq_path), str(out))
+    with np.load(out) as d:
+        assert {"y_true", "y_scores", "time_slots", "user_ids"} <= set(d.files)
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pytest tests/test_predict.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'src.eval.predict'`
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create the empty package marker:
+```bash
+: > src/eval/predict/__init__.py
+```
+
+Create `src/eval/predict/runner.py`:
 ```python
 # src/eval/predict/runner.py
 """Model-agnostic inference: turn a trained model + sequences into predictions.npz arrays."""
@@ -142,9 +360,11 @@ from src.data.preprocessing.dataset import (
     HabitDataset, build_user_mapping, train_val_test_split,
 )
 from src.data.preprocessing.preprocessor import load_sequences
+from src.models.registry import get_model_class
 
 
-def load_checkpoint_config(checkpoint_path: str) -> dict:
+def load_checkpoint(checkpoint_path: str) -> dict:
+    """Load a checkpoint and require it to be self-describing (has 'config')."""
     ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if ckpt.get("config") is None:
         raise ValueError(
@@ -160,7 +380,8 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
     """Run the model over the deterministic test split; return Regime-A arrays.
 
     Returns dict with: y_true (N,), y_scores (N, n_classes), time_slots (N,),
-    user_ids (N,).
+    user_ids (N,). The test split and example order are fully determined by
+    config['seed'/'val_frac'/'test_frac'/'window'], so output is reproducible.
     """
     model = model.to(device).eval()
     window = config["window"]
@@ -171,7 +392,6 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
     )
     user_to_idx = build_user_mapping(sequences)
 
-    # Match train_main's per-split build, minus routines (not needed for ranking).
     arr = np.stack([test_seqs[k] for k in test_seqs])
     uids = np.array([user_to_idx[k] for k in test_seqs], dtype=np.int64)
     ds = HabitDataset(arr, window_size=window, user_ids=uids)  # 3-tuple (x, y, user_id)
@@ -187,11 +407,10 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
     y_true = torch.cat(y_true).numpy()
     user_ids = torch.cat(user_ids).numpy()
 
-    # time_slots: with shuffle=False the i-th example is row=i//wps, t=i%wps,
-    # predicted absolute slot = t + window. (wps = num_slots - window)
+    # With shuffle=False, example i is row=i//wps, t=i%wps, predicted absolute
+    # slot = t + window. (wps = num_slots - window = ds.windows_per_seq)
     wps = ds.windows_per_seq
-    n = len(ds)
-    time_slots = (np.arange(n) % wps + window).astype(np.int64)
+    time_slots = (np.arange(len(ds)) % wps + window).astype(np.int64)
 
     return {
         "y_true": y_true.astype(np.int64),
@@ -206,20 +425,54 @@ def save_predictions(arrays: dict, out_path: str, model_name: str) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez(out, model=np.array(model_name), **arrays)
     print(f"Saved {len(arrays['y_true'])} predictions to {out}")
+
+
+def predict_from_checkpoint(checkpoint_path: str, sequences_path: str,
+                            out_path: str | None = None,
+                            batch_size: int = 256, device: str = "cpu") -> str:
+    """Rebuild the model from a self-describing checkpoint, run inference, save npz."""
+    ckpt = load_checkpoint(checkpoint_path)
+    config = ckpt["config"]
+    model_name = config["model"]
+
+    model = get_model_class(model_name)(**config["model_kwargs"])
+    model.load_state_dict(ckpt["model_state"])
+
+    sequences = load_sequences(sequences_path)
+    arrays = run_ranking_predictions(
+        model, sequences, config, batch_size=batch_size, device=device,
+    )
+    out_path = out_path or f"data/processed/predictions_{model_name}.npz"
+    save_predictions(arrays, out_path, model_name)
+    return out_path
 ```
 
-- [ ] **Step 2: Commit** — `feat: add model-agnostic prediction runner`
+- [ ] **Step 4: Run tests to verify they pass**
 
-### Task 4: GRU4Rec prediction entry
+Run: `pytest tests/test_predict.py -v`
+Expected: PASS (5 passed)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/eval/predict/__init__.py src/eval/predict/runner.py tests/test_predict.py
+git commit -m "feat: add model-agnostic prediction runner"
+```
+
+---
+
+## Task 4: GRU4Rec prediction entry point
 
 **Files:**
 - Create: `src/eval/predict/gru4rec.py`
 
-- [ ] **Step 1: Implement the thin entry.**
+The end-to-end behavior is already covered by `test_predict_from_checkpoint_end_to_end` (Task 3), which exercises the only logic this entry point contains. This task adds the discoverable CLI wrapper.
+
+- [ ] **Step 1: Write the entry point**
 
 ```python
 # src/eval/predict/gru4rec.py
-"""Emit predictions.npz for a trained GRU4Rec checkpoint.
+"""Emit predictions.npz for a trained checkpoint (any model; name read from config).
 
 Usage:
     python -m src.eval.predict.gru4rec \
@@ -229,11 +482,7 @@ Usage:
 """
 import argparse
 
-from src.data.preprocessing.preprocessor import load_sequences
-from src.models.registry import get_model_class
-from src.eval.predict.runner import (
-    load_checkpoint_config, run_ranking_predictions, save_predictions,
-)
+from src.eval.predict.runner import predict_from_checkpoint
 
 
 def main():
@@ -244,69 +493,93 @@ def main():
     p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--device",     default="cpu")
     args = p.parse_args()
-
-    ckpt = load_checkpoint_config(args.checkpoint)
-    config = ckpt["config"]
-    model_name = config["model"]
-
-    model = get_model_class(model_name)(**config["model_kwargs"])
-    model.load_state_dict(ckpt["model_state"])
-
-    sequences = load_sequences(args.sequences)
-    arrays = run_ranking_predictions(
-        model, sequences, config,
+    predict_from_checkpoint(
+        args.checkpoint, args.sequences, args.out,
         batch_size=args.batch_size, device=args.device,
     )
-    out = args.out or f"data/processed/predictions_{model_name}.npz"
-    save_predictions(arrays, out, model_name)
 
 
 if __name__ == "__main__":
     main()
 ```
 
-> Note: the entry is intentionally generic — `model_name` comes from the checkpoint config, so the same body works for any model. The per-model file exists so each model has a discoverable entry point (`python -m src.eval.predict.<model>`); the LSTM/Transformer entries are near-identical and added in Phase B once those models exist.
+> The body is model-agnostic (model name comes from the checkpoint `config`), so LSTM/Transformer entries added later are near-identical wrappers calling the same `predict_from_checkpoint`.
 
-- [ ] **Step 2: Commit** — `feat: add GRU4Rec prediction entry point`
+- [ ] **Step 2: Verify the CLI wiring imports and parses**
 
-### Task 5: Tests
+Run: `python -m src.eval.predict.gru4rec --help`
+Expected: argparse usage text prints, exit 0.
 
-**Files:**
-- Create: `tests/test_predict.py`
+- [ ] **Step 3: Commit**
 
-- [ ] **Step 1:** Tests using a tiny synthetic sequences dict and a real `GRU4Rec` (small `n_users`):
-  - `run_ranking_predictions` returns the four keys with consistent first dim `N`, `y_scores` shape `(N, 11)`, `time_slots` within `[window, 47]`, and `user_ids` drawn from the global mapping.
-  - **Determinism**: two runs with the same config produce identical `y_true`/`time_slots`/`user_ids` (split is seeded).
-  - `save_predictions` round-trips: `np.load` returns the same arrays plus `model`.
-  - `load_checkpoint_config` raises a clear error when `config` is absent.
-  - (torch is required; mirror the existing torch-dependent tests — they aren't run in the doc-authoring sandbox but run in a torch env.)
-
-- [ ] **Step 2: Commit** — `test: cover prediction runner and checkpoint config`
-
-### Task 6: Docs + end-to-end verification
-
-- [ ] **Step 1:** Update `README.md`: add the `predict` step between train and evaluate, and move the predictions.npz item out of "known gaps":
-  ```bash
-  python preprocess.py
-  python train_main.py --epochs 5
-  python -m src.eval.predict.gru4rec --checkpoint checkpoints/best.pt
-  python evaluate.py --predictions data/processed/predictions_gru4rec.npz
-  ```
-- [ ] **Step 2: Verify E2E** in a torch environment: the four commands above run clean and `evaluate.py` prints ranking + per-class metrics (no "missing artifact" message). `pytest tests/` green.
-- [ ] **Step 3: Commit** — `docs: document predict step in E2E pipeline`
-
-**Phase A definition of done:** `evaluate.py` produces real ranking/per-class metrics from a trained checkpoint with zero manual flag-matching, and the model-comparison/per-slot/per-activity plots in `examples/` can be driven from real `predictions_<model>.npz`.
+```bash
+git add src/eval/predict/gru4rec.py
+git commit -m "feat: add GRU4Rec prediction entry point"
+```
 
 ---
 
-## Phase B — Sequence & routine metrics (design only; implement later)
+## Task 5: Document the predict step and verify E2E
 
-Implement after Phase A and (ideally) after the ablation models exist. Adds the full-day capability that unlocks `sequence_match_score`, `routine_similarity_score`, and `deviation_reduction`.
+**Files:**
+- Modify: `README.md`
 
-1. **Autoregressive rollout** — add `rollout(model, seed_context, window, n_slots=48, device)` to `runner.py`: seed with each test user's first `window` real slots, then predict slot-by-slot (greedy argmax — decision: greedy vs sampling), feeding each prediction back as context. Produces one `pred_sequence (48,)` per user. Shared so ablation models reuse it verbatim.
-2. **Per-user templates** — the nearest routine template per user via the existing `RoutineMatcher`. Routines must be reachable at predict time: either (a) serialize `routines (R, 48)` alongside the checkpoint during training, or (b) rebuild them in predict from the train split using `build_routines` with the stored `k_routines`/`seed` (decision pending; (a) is more faithful, (b) avoids a new artifact). `template_sequence` = the full nearest-routine day; `original_sequence` = the user's real day; `true_sequence` = same real day for `sequence_match`.
-3. **Population aggregation** — `evaluate.py`'s sequence path takes single sequences today. Extend `src/eval/evaluation.py` with batched variants (accept `(M, 48)` arrays and average), or add `evaluate_sequences(preds, originals, templates)` that loops and returns means. This is the one place Phase B touches existing eval code.
-4. **Extend `predictions_<model>.npz`** with `pred_sequences (M, 48)`, `original_sequences (M, 48)`, `template_sequences (M, 48)`, and the corresponding `user_ids (M,)`; teach `evaluate.py` to consume the batched keys.
-5. **Per-model entries** — add `src/eval/predict/lstm.py` and `transformer.py` (each ~10 lines, reusing the runner) once those models land.
+- [ ] **Step 1: Update the README pipeline section**
 
-**Open questions to resolve at Phase B kickoff:** greedy vs sampled decoding; serialize-vs-rebuild routines; whether `deviation_reduction`'s "original" should be the raw day or a partially-observed day. None block Phase A.
+In `README.md`, add the `predict` step between training and evaluation, and move the "predictions.npz handoff" item out of the known-gaps list. The runnable flow becomes:
+```bash
+python preprocess.py
+python train_main.py --epochs 5
+python -m src.eval.predict.gru4rec --checkpoint checkpoints/best.pt
+python evaluate.py --predictions data/processed/predictions_gru4rec.npz
+```
+Update the known-gaps section to keep only: LSTM/Transformer ablations, full-day autoregressive rollout for sequence-level metrics (Regime B), and CI.
+
+- [ ] **Step 2: Run the full test suite**
+
+Run: `pytest tests/ -v`
+Expected: PASS — all of `test_dataset.py`, `test_evaluation.py`, `test_training.py`, `test_registry.py`, `test_predict.py`.
+
+- [ ] **Step 3: End-to-end smoke (requires the real data + torch)**
+
+Run:
+```bash
+python preprocess.py
+python train_main.py --epochs 2
+python -m src.eval.predict.gru4rec --checkpoint checkpoints/best.pt
+python evaluate.py --predictions data/processed/predictions_gru4rec.npz
+```
+Expected: `evaluate.py` prints a JSON report containing `accuracy`, `hit_rate@k`, `ndcg@k`, and `per_class_accuracy` — and does **not** print the "Cannot run real evaluation yet — required artifact(s) missing" message.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add README.md
+git commit -m "docs: document predict step in E2E pipeline"
+```
+
+---
+
+## Phase A Definition of Done
+
+`evaluate.py` produces real ranking + per-class metrics from a trained checkpoint with zero manual flag-matching, and the model-comparison / per-slot / per-activity plots in `examples/` can be driven from a real `predictions_<model>.npz`. Full `pytest tests/` is green.
+
+---
+
+## Out of Scope — Future Plan: Regime B (sequence & routine metrics)
+
+Not part of this plan. Track as a separate spec/plan once Phase A lands (and ideally after the LSTM/Transformer ablation models exist). It will add:
+
+- **Autoregressive rollout** (`rollout(model, seed_context, window, n_slots=48)` in `runner.py`) to produce a full 48-slot `pred_sequence` per user — open decision: greedy vs sampled decoding.
+- **Per-user routine templates** via the existing `RoutineMatcher` — open decision: serialize `routines` alongside the checkpoint vs. rebuild from the train split using stored `k_routines`/`seed`.
+- **Population aggregation** — extend `src/eval/evaluation.py`'s sequence metrics (today single-day) to accept batched `(M, 48)` arrays; teach `evaluate.py` to read the batched keys.
+- **Extended npz** — `pred_sequences`, `original_sequences`, `template_sequences`, matching `user_ids`.
+- **Per-model entries** `src/eval/predict/{lstm,transformer}.py` (~15 lines each, reusing `predict_from_checkpoint`).
+
+---
+
+## Self-Review
+
+- **Spec coverage:** Brainstorm decisions → tasks: phased/Regime-A-only → whole plan + explicit out-of-scope section ✓; dedicated `src/eval/predict/` → Tasks 3–4 ✓; shared core + thin entry → `runner.py` (Task 3) + `gru4rec.py` (Task 4) ✓; self-describing checkpoint config → Task 2 ✓; per-model `predictions_<model>.npz` → `save_predictions`/`predict_from_checkpoint` default ✓; registry for ablation-readiness → Task 1 ✓.
+- **Type/name consistency:** `get_model_class` (Tasks 1, 3); `config` keys `model`/`model_kwargs`/`window`/`val_frac`/`test_frac`/`seed`/`k_routines`/`n_classes` defined in Task 2 and consumed identically in Task 3; `load_checkpoint` / `run_ranking_predictions` / `save_predictions` / `predict_from_checkpoint` signatures match between `runner.py` (Task 3), its tests (Task 3), and `gru4rec.py` (Task 4). `HabitDataset(arr, window_size=…, user_ids=…)` 3-tuple matches the merged `src/data/preprocessing/dataset.py`. `evaluate.py` already reads `y_true/y_scores/time_slots/user_ids` — no change needed.
+- **Placeholder scan:** No TBD/TODO; every code step contains complete code; every run step states expected output.
