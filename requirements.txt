@@ -1,0 +1,12 @@
+# Core dependencies for the CPU/dev workflow.
+# Conservative lower-bound pins; PyTorch may need an explicit index URL
+# for CPU/GPU wheels, e.g.:
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
+matplotlib>=3.7
+
+# Testing
+pytest>=7.0
