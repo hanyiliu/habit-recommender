@@ -91,6 +91,10 @@ The checkpoint is self-describing (it carries its model architecture and the
 split configuration used during training), so no extra flags need to be
 re-specified.
 
+> Note: the output file is `predictions_<model>.npz`, but `evaluate.py`
+> defaults to `predictions.npz` — pass `--predictions data/processed/predictions_gru4rec.npz`
+> (as the end-to-end flow above does) so it picks up the right file.
+
 Other available flags (defaults shown):
 
 ```bash
