@@ -31,10 +31,11 @@ def _knee_lambda(results, primary_metric, alignment_metric):
     length = float(np.hypot(chord[0], chord[1]))
     if length == 0.0:
         return pts[0]["lambda"]
-    dists = [
-        abs(float(np.cross(chord, np.array([xn[i], yn[i]]) - p1))) / length
-        for i in range(len(pts))
-    ]
+    dists = []
+    for i in range(len(pts)):
+        v = np.array([xn[i], yn[i]]) - p1
+        cross = chord[0] * v[1] - chord[1] * v[0]
+        dists.append(abs(float(cross)) / length)
     return pts[int(np.argmax(dists))]["lambda"]
 
 
