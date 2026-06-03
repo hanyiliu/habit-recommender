@@ -11,3 +11,8 @@ matplotlib>=3.7
 
 # Testing
 pytest>=7.0
+
+# Notebook
+jupytext>=1.16
+nbconvert>=7.0
+ipykernel>=6.0
