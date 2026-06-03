@@ -10,8 +10,8 @@
 # %% [markdown]
 # # End-to-End λ-Selection: Fidelity vs. Routine Alignment
 #
-# The model is trained with `L = L_BPR + λ·L_KL`. BPR rewards predicting the
-# user's **actual** next activity (fidelity); the KL term nudges predictions
+# The model is trained with `L = CE + λ·L_KL`. The cross-entropy term rewards
+# predicting the user's **actual** next activity (fidelity); the KL term nudges predictions
 # toward the nearest healthy **routine template** (alignment). This notebook
 # runs a **two-stage** search on GRU4Rec: a cheap coarse λ-sweep (short epoch
 # budget) measures both axes on the held-out test split and picks λ* as the
@@ -19,7 +19,7 @@
 # winning λ* is then retrained at the **full** epoch budget for final metrics.
 #
 # Caveats (kept honest): both axes are *in-sample to the loss* — fidelity tracks
-# what BPR optimizes, alignment tracks what KL optimizes — and alignment here is
+# what the cross-entropy term optimizes, alignment tracks what KL optimizes — and alignment here is
 # a *single-step* proxy, not a full-day behavioral outcome. λ* is a candidate to
 # later confirm against a cumulative deviation-reduction metric (Regime B).
 
@@ -352,7 +352,7 @@ plt.show()
 # ## 9. Conclusions
 #
 # - **λ\*** is the most template-aligned GRU4Rec whose next-activity ranking
-#   quality stays within 5% of the pure-BPR ceiling — the strongest nudge we can
+#   quality stays within 5% of the no-nudge (λ=0, cross-entropy-only) ceiling — the strongest nudge we can
 #   apply while keeping recommendations credible.
 # - **Two-stage search:** λ* was chosen on a cheap 15-epoch sweep, then
 #   retrained at the full 50-epoch budget for the shipped metrics. This assumes
@@ -361,7 +361,7 @@ plt.show()
 #   length, widen the sweep budget).
 # - The **realism gap** narrows monotonically with λ, making the
 #   fidelity↔nudge trade explicit.
-# - **Caveats:** both axes are in-sample to the loss (fidelity≈BPR, alignment≈KL),
+# - **Caveats:** both axes are in-sample to the loss (fidelity≈cross-entropy, alignment≈KL),
 #   so the curve shows the *menu* of trades, not which is "best" — that is set by
 #   the fidelity floor. Alignment is a single-step proxy; the final confirmation
 #   of λ\* is a full-day cumulative deviation-reduction metric (Regime B), which

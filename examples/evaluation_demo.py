@@ -150,7 +150,7 @@ def main() -> None:
         save_path=os.path.join(out_dir, "comparison_ndcg5.png"),
     )
 
-    # Ablation: lambda=0 (BPR only) vs lambda>0 (BPR + KL).
+    # Ablation: lambda=0 (fidelity only) vs lambda>0 (CE + KL).
     ablation = {
         "lambda=0":   results["GRU4Rec_lambda=0"],
         "lambda=0.5": results["GRU4Rec_lambda=0.5"],
@@ -159,7 +159,7 @@ def main() -> None:
     plot_ablation_comparison(
         ablation,
         metric_names=["accuracy", "hit_rate@5", "ndcg@5"],
-        title="Ablation: BPR-only vs BPR+KL (synthetic)",
+        title="Ablation: fidelity-only vs CE+KL (synthetic)",
         save_path=os.path.join(out_dir, "ablation_lambda.png"),
     )
 

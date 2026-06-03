@@ -119,9 +119,18 @@ template-alignment loss.
   exhaustively — no separate retrieval stage.
 
 ### Loss function
-`L = L_BPR + λ · L_KL` (`src/models/loss/combined_loss.py`):
-- **`L_BPR`** — sample negatives, rank the true next activity above them
-  (`bpr_loss`, `n_neg=10`).
+`L = L_CE + λ · L_KL` (`src/models/loss/combined_loss.py`):
+- **`L_CE`** — softmax cross-entropy of the model's distribution against the
+  true next activity (the fidelity term). With only 11 activity classes the
+  model already scores every candidate, so full cross-entropy is the natural,
+  lower-variance choice — no negative sampling needed.
+
+  > **Correction vs. earlier spec:** the fidelity term is **softmax
+  > cross-entropy**, not BPR. BPR's negative sampling is meant for huge item
+  > catalogs; with 11 classes each example has only 10 negatives, so sampling
+  > `n_neg=10` was nearly the full set anyway. Cross-entropy is cleaner and
+  > lower-variance here.
+
 - **`L_KL`** — KL divergence between the model's distribution and a one-hot at
   the template's target activity for that slot, implemented as cross-entropy
   (`kl_loss`). The nudging term.
@@ -130,16 +139,16 @@ template-alignment loss.
 ### Comparison models (ablations)
 - **LSTM** — same architecture, GRU → LSTM.
 - **Transformer** — single-head self-attention over the slot sequence.
-- **GRU4Rec (λ=0)** — pure BPR, isolates the template-alignment contribution
-  (supported today via `--lambda-kl 0`).
+- **GRU4Rec (λ=0)** — fidelity-only (pure cross-entropy), isolates the
+  template-alignment contribution (supported today via `--lambda-kl 0`).
 
 ---
 
 ## 4. Recommender-systems framing
 - **Sequential recommendation** — next-item prediction over a time-ordered
   sequence (GRU4Rec).
-- **Personalized ranking** — BPR ranks the correct next activity above
-  negatives, per user.
+- **Next-activity classification** — softmax cross-entropy scores the correct
+  next activity against all 11 candidates, per user.
 - **Collaborative signals** — the user-ID embedding shares patterns across
   similar users.
 - **Template-based recommendation** — matching users to population-derived
@@ -155,7 +164,7 @@ ATUS raw .dat  →  parse + 30-min discretize  →  map to 11 categories
    →  k-means into K archetypes
    →  score individuals → filter top-N per cluster → per-slot mode → K templates
    →  per-user sliding windows + K templates
-   →  GRU4Rec training (L_BPR + λ·L_KL)
+   →  GRU4Rec training (L_CE + λ·L_KL)
    →  inference: match partial day → nearest template (Hamming);
       GRU predicts next activity nudged toward template
    →  recommended next activity
@@ -196,7 +205,7 @@ What is built vs. what is still planned, so the spec stays honest.
 - Health-scored template builder: k-means, 5-feature individual scoring,
   top-fraction filtering, per-slot-mode templates, small-cluster merging,
   K × threshold sweep.
-- GRU4Rec (64/64 → 128 → 128 → 11), BPR + λ·KL loss, λ=0 ablation, user-ID
+- GRU4Rec (64/64 → 128 → 128 → 11), cross-entropy + λ·KL loss, λ=0 ablation, user-ID
   personalization, Hamming template matching.
 - LSTM / Transformer ablation models (`LSTMRec`, `TransformerRec`), sharing
   GRU4Rec's `forward(sequences, user_ids) -> (B, 11)` interface and resolved via
@@ -208,7 +217,7 @@ What is built vs. what is still planned, so the spec stays honest.
 
 ### 🟡 Planned — noted, not yet implemented
 1. **Model selection by validation NDCG@10.** Current training selects the best
-   checkpoint by **validation loss** (combined BPR+KL) and `λ` is not yet tuned
+   checkpoint by **validation loss** (combined CE+KL) and `λ` is not yet tuned
    on NDCG@10 (`src/training/train.py`). Selecting/tuning on validation NDCG@10
    is a planned refinement.
 2. **Multi-year ATUS ingestion.** `preprocess.py` currently loads a single year

@@ -71,7 +71,7 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int,   default=256)
     p.add_argument("--lr",         type=float, default=1e-3)
     p.add_argument("--lambda-kl",  type=float, default=0.5,
-                   help="KL loss weight (0.0 = BPR-only ablation)")
+                   help="KL loss weight (0.0 = fidelity-only / cross-entropy-only ablation)")
     p.add_argument("--k-routines", type=int,   default=10,
                    help="Number of K-means clusters for routine building")
     p.add_argument("--window",     type=int,   default=24,
