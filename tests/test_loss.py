@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from src.models.loss.combined_loss import combined_loss
-from src.models.loss.kl_loss import kl_loss
+from src.models.loss.template_cross_entropy import template_cross_entropy
 
 
 def _inputs(B=8, n=11, seed=0):
@@ -17,7 +17,7 @@ def test_combined_loss_is_cross_entropy_plus_lambda_kl():
     # Fidelity term is softmax cross-entropy on the true next activity (no BPR).
     logits, targets, routine = _inputs()
     lam = 0.5
-    expected = F.cross_entropy(logits, targets) + lam * kl_loss(logits, routine)
+    expected = F.cross_entropy(logits, targets) + lam * template_cross_entropy(logits, routine)
     got = combined_loss(logits, targets, routine, lambda_kl=lam)
     assert torch.allclose(got, expected)
 
