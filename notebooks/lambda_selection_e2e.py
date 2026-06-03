@@ -36,6 +36,17 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 
+# Anchor to the repo root regardless of the kernel's working directory
+# (nbconvert runs the kernel inside notebooks/). This makes `src` importable
+# AND makes every relative path below (data/, checkpoints/, examples/) resolve
+# against the repo root, exactly as preprocess.py / evaluate.py expect.
+import sys
+for _cand in (Path.cwd().resolve(), *Path.cwd().resolve().parents):
+    if (_cand / "src").is_dir():
+        sys.path.insert(0, str(_cand))
+        os.chdir(_cand)
+        break
+
 from src.data.preprocessing.preprocessor import load_sequences
 from src.data.preprocessing.dataset import (
     HabitDataset, build_user_mapping, train_val_test_split,
