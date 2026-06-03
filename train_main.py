@@ -21,7 +21,7 @@ from src.data.preprocessing.dataset import (
     train_val_test_split,
 )
 from src.data.preprocessing.preprocessor import load_sequences
-from src.eval.evaluation import evaluate_ranking
+from src.eval.evaluation import evaluate_alignment, evaluate_ranking
 from src.models.registry import get_model_class, SUPPORTED_MODELS
 from src.scoring.scoring import build_routines
 from src.training.train import Trainer
@@ -36,18 +36,27 @@ def _build_dataset(split, user_to_idx, routines, window):
 
 @torch.no_grad()
 def evaluate_model(model, loader, device: str = "cpu") -> dict:
-    """Collect predictions over a loader and score them with src.eval.evaluation."""
+    """Collect predictions over a loader and score them with src.eval.evaluation.
+
+    The test loader yields routine_targets (4th element), so we also report how
+    well the model aligns with the optimal-routine templates, alongside its
+    agreement with the user's actual next activity.
+    """
     model.eval()
-    all_logits, all_targets = [], []
-    for context, targets, user_ids, _ in loader:
+    all_logits, all_targets, all_routine = [], [], []
+    for context, targets, user_ids, routine_targets in loader:
         logits = model(context.to(device), user_ids.to(device)).cpu()
         all_logits.append(logits)
         all_targets.append(targets)
+        all_routine.append(routine_targets)
     if not all_logits:
         return {}
     logits = torch.cat(all_logits).numpy()
     targets = torch.cat(all_targets).numpy()
-    return evaluate_ranking(targets, logits, ks=(1, 5))
+    routine = torch.cat(all_routine).numpy()
+    metrics = evaluate_ranking(targets, logits, ks=(1, 5))
+    metrics.update(evaluate_alignment(routine, logits, ks=(1, 5)))
+    return metrics
 
 
 def build_args() -> argparse.Namespace:
@@ -139,7 +148,10 @@ def main():
     metrics = evaluate_model(trainer.model, test_loader, device=args.device)
     print(
         f"\nTest metrics | accuracy: {metrics['accuracy']:.4f} | "
-        f"hit_rate@5: {metrics['hit_rate@5']:.4f} | ndcg@5: {metrics['ndcg@5']:.4f}"
+        f"hit_rate@5: {metrics['hit_rate@5']:.4f} | ndcg@5: {metrics['ndcg@5']:.4f}\n"
+        f"Alignment   | alignment_accuracy: {metrics['alignment_accuracy']:.4f} | "
+        f"alignment_hit_rate@5: {metrics['alignment_hit_rate@5']:.4f} | "
+        f"realism_gap: {metrics['accuracy'] - metrics['alignment_accuracy']:+.4f}"
     )
 
 
