@@ -294,3 +294,63 @@ def plot_ablation_comparison(
     fig.tight_layout()
     _save(fig, save_path)
     return fig, ax
+
+
+def plot_alignment_tradeoff(
+    results,
+    fidelity_key: str = "ndcg@5",
+    alignment_key: str = "alignment_ndcg@5",
+    lambda_key: str = "lambda",
+    selected_lambda: Optional[float] = None,
+    floor: Optional[float] = None,
+    save_path: Optional[str] = None,
+    title: Optional[str] = None,
+):
+    """Fidelity-vs-alignment tradeoff curve parameterized by λ.
+
+    Parameters
+    ----------
+    results : sequence of mappings
+        Each item has ``lambda_key``, ``fidelity_key`` (agreement with the
+        user's actual next activity, y-axis) and ``alignment_key`` (agreement
+        with the routine template, x-axis).
+    selected_lambda : float, optional
+        The chosen λ*; its point is highlighted.
+    floor : float, optional
+        Fidelity floor; drawn as a horizontal reference line.
+
+    Returns ``(fig, ax)``.
+    """
+    if not results:
+        raise ValueError("results is empty.")
+    pts = sorted(results, key=lambda r: r[lambda_key])
+    xs = [float(r[alignment_key]) for r in pts]
+    ys = [float(r[fidelity_key]) for r in pts]
+    lams = [r[lambda_key] for r in pts]
+
+    fig, ax = plt.subplots(figsize=(6.5, 5))
+    ax.plot(xs, ys, "-o", color="#3b6", zorder=2)
+    for x, y, lam in zip(xs, ys, lams):
+        ax.annotate(f"λ={lam}", (x, y), textcoords="offset points",
+                    xytext=(6, 4), fontsize=8)
+
+    if selected_lambda is not None:
+        for x, y, lam in zip(xs, ys, lams):
+            if lam == selected_lambda:
+                ax.scatter([x], [y], s=160, facecolors="none",
+                           edgecolors="crimson", linewidths=2, zorder=3,
+                           label=f"selected λ*={lam}")
+                break
+
+    if floor is not None:
+        ax.axhline(floor, color="gray", ls="--", lw=1,
+                   label=f"fidelity floor = {floor:.3f}")
+
+    ax.set_xlabel(f"Alignment ({alignment_key}) — agreement with routine template")
+    ax.set_ylabel(f"Fidelity ({fidelity_key}) — agreement with real behavior")
+    ax.set_title(title or "Fidelity vs. alignment tradeoff over λ")
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+    _save(fig, save_path)
+    return fig, ax
