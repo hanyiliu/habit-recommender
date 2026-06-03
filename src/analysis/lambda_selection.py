@@ -59,6 +59,11 @@ def select_lambda(
     """
     if not results:
         raise ValueError("results is empty.")
+    if floor_frac < 0:
+        raise ValueError(
+            "floor_frac must be non-negative (a negative floor would exclude "
+            "even the lambda=0 ceiling)."
+        )
     base = [r for r in results if r["lambda"] == 0]
     if not base:
         raise ValueError(

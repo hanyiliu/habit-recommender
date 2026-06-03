@@ -49,3 +49,20 @@ def test_requires_lambda_zero_baseline():
 def test_empty_results_raises():
     with pytest.raises(ValueError, match="empty"):
         select_lambda([])
+
+
+def test_negative_floor_frac_raises():
+    # A negative floor would push the floor above the ceiling, leaving no
+    # candidates (even λ=0 fails) and an opaque max() error. Reject it up front.
+    with pytest.raises(ValueError, match="floor_frac"):
+        select_lambda(_results(), floor_frac=-0.1)
+
+
+def test_duplicate_lambda_rows_pick_higher_alignment():
+    results = [
+        {"lambda": 0.0, "ndcg@5": 0.85, "alignment_ndcg@5": 0.60},
+        {"lambda": 0.5, "ndcg@5": 0.83, "alignment_ndcg@5": 0.70},
+        {"lambda": 0.5, "ndcg@5": 0.83, "alignment_ndcg@5": 0.78},
+    ]
+    sel = select_lambda(results, floor_frac=0.05)
+    assert sel["lambda_star"] == 0.5
