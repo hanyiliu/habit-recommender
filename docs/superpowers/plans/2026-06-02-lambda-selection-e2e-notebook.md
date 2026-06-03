@@ -10,7 +10,7 @@
 
 **Design doc:** `docs/superpowers/specs/2026-06-02-lambda-selection-e2e-notebook-design.md`
 
-> **Environment note:** all tests and the notebook require torch, scikit-learn, pandas, and matplotlib. Run `pip install -r requirements.txt` first. The notebook's first full run trains 8 GRU4Rec models (EPOCHS=50 each) on CPU — expect this to take a while; subsequent runs load cached checkpoints and are fast.
+> **Environment note:** all tests and the notebook require torch, scikit-learn, pandas, and matplotlib. Run `pip install -r requirements.txt` first. The notebook auto-selects the Apple-Silicon GPU (`DEVICE="mps"`) when available, else CPU. Its first full run trains 8 GRU4Rec models (EPOCHS=50 each) — slow even on MPS; subsequent runs load cached checkpoints and are fast. `PYTORCH_ENABLE_MPS_FALLBACK=1` is set in the notebook so any op lacking an MPS kernel silently falls back to CPU.
 
 ---
 
@@ -407,6 +407,11 @@ Create `notebooks/lambda_selection_e2e.py` with exactly this content:
 # later confirm against a cumulative deviation-reduction metric (Regime B).
 
 # %%
+import os
+# Let any op without an MPS kernel fall back to CPU instead of erroring.
+# Must be set before torch is imported.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 import json
 import random
 from pathlib import Path
@@ -438,7 +443,9 @@ WINDOW = 24
 K_ROUTINES = 10
 BATCH = 256
 LR = 1e-3
-DEVICE = "cpu"
+# Prefer the Apple-Silicon GPU (MPS) when present; fall back to CPU otherwise.
+DEVICE = "mps" if torch.backends.mps.is_available() else "cpu"
+print(f"Using device: {DEVICE}")
 PRIMARY = "ndcg@5"
 ALIGNMENT = "alignment_ndcg@5"
 FLOOR_FRAC = 0.05
@@ -726,4 +733,4 @@ and a printed λ\* rationale. Re-running the notebook uses cached checkpoints.
 - **Spec coverage:** cached training (Task 4 `train_or_load`); GRU4Rec-only sweep over the 8-point grid (Task 4 `LAMBDAS`); convergence diagnostic (Task 4 §3 + saved history); per-λ fidelity+alignment eval on the best checkpoint (Task 4 §4 `eval_checkpoint`); tradeoff plot (Task 2 + notebook §5); floor+max-alignment selection with knee sanity check (Task 1 + notebook §6); alignment-as-lift (notebook §4/§6); caveats in conclusions (notebook §8); tested selection + plot (Tasks 1–2); end-to-end execution (Task 5).
 - **Type/name consistency:** metric keys `ndcg@5` / `alignment_ndcg@5` / `accuracy` match `evaluate_ranking`/`evaluate_alignment` output (verified in `src/eval/evaluation.py`). `select_lambda(results, primary_metric, alignment_metric, floor_frac)` and its return keys (`lambda_star`, `ceiling`, `floor`, `knee_lambda`, `candidates`, `rationale`) are identical in Task 1, its tests, and notebook §5–6. `plot_alignment_tradeoff(results, fidelity_key, alignment_key, lambda_key, selected_lambda, floor, save_path, title)` matches between Task 2, its test, and notebook §5. `run_ranking_predictions(model, sequences, config, batch_size, device, routines)`, `build_routines(arr, K=, random_state=)→(routines,_,_)`, `Trainer(model, train_loader, val_loader, lr, lambda_kl, device, config)` + `.fit(n_epochs, checkpoint_path)→history`, `load_checkpoint`, `HabitDataset(arr, window_size=, routines=, user_ids=)`, `build_user_mapping`, `train_val_test_split` all match `main` as read during planning.
 - **Placeholder scan:** no TBD/TODO; every code step is complete; the one runtime-dependent name (`preprocess_atus`, used only on the cold-data path) has an explicit verify-and-fix step (Task 5 Step 2) rather than being assumed silently.
-- **Risk flagged:** first execution is long (8×50 epochs CPU); mitigated by caching and the generous nbconvert timeout. Checkpoints are artifacts and called out as not-to-commit unless gitignored.
+- **Risk flagged:** first execution is long (8×50 epochs); runs on MPS when available (CPU fallback) and is mitigated by caching and the generous nbconvert timeout. MPS↔CPU numeric differences are fine here — metrics are compared *within* one device's run, and determinism is per-device. Checkpoints are artifacts and called out as not-to-commit unless gitignored.
