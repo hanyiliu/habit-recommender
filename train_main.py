@@ -38,9 +38,11 @@ def _build_dataset(split, user_to_idx, routines, window):
 def evaluate_model(model, loader, device: str = "cpu") -> dict:
     """Collect predictions over a loader and score them with src.eval.evaluation.
 
-    The test loader yields routine_targets (4th element), so we also report how
-    well the model aligns with the optimal-routine templates, alongside its
-    agreement with the user's actual next activity.
+    The loader MUST be routines-bearing: each batch is unpacked as a 4-tuple
+    (context, targets, user_ids, routine_targets). The routine_targets (4th
+    element) let us also report how well the model aligns with the
+    optimal-routine templates, alongside its agreement with the user's actual
+    next activity.
     """
     model.eval()
     all_logits, all_targets, all_routine = [], [], []
