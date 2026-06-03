@@ -22,6 +22,7 @@ It may also include any of:
 
     time_slots         : int array (n_samples,)         slot index per sample (0..47)
     user_ids           : int array (n_samples,)         user index per sample
+    routine_targets    : int array (n_samples,)         optimal-template activity per sample
     pred_sequence      : int array (48,)                model's predicted day for a user
     true_sequence      : int array (48,)                ground-truth day for that user
     original_sequence  : int array (48,)                original (un-fixed) day for deviation_reduction
@@ -44,6 +45,7 @@ from typing import Optional
 import numpy as np
 
 from src.eval.evaluation import (
+    evaluate_alignment,
     evaluate_all,
     evaluate_ranking,
     per_class_accuracy,
@@ -131,6 +133,28 @@ def main() -> int:
     }
     results.update(evaluate_ranking(y_true, y_scores, ks=tuple(args.ks)))
     results["per_class_accuracy"] = per_class_accuracy(y_true, y_scores)
+
+    if "routine_targets" in preds:
+        routine_targets = np.asarray(preds["routine_targets"])
+        if routine_targets.shape == y_true.shape:
+            alignment = evaluate_alignment(
+                routine_targets, y_scores, ks=tuple(args.ks)
+            )
+            results.update(alignment)
+            results["realism_minus_alignment_accuracy"] = (
+                results["accuracy"] - alignment["alignment_accuracy"]
+            )
+        else:
+            results["alignment_skipped"] = (
+                f"routine_targets shape {routine_targets.shape} does not match "
+                f"y_true shape {y_true.shape}."
+            )
+    else:
+        results["alignment_skipped"] = (
+            "No routine_targets in predictions file. Re-run prediction with a "
+            "checkpoint whose training set was large enough to build routines "
+            "so the runner emits them."
+        )
 
     seq_kwargs = {}
     for key in ("pred_sequence", "true_sequence", "original_sequence", "template_sequence"):

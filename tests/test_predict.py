@@ -128,3 +128,33 @@ def test_predict_from_checkpoint_skips_routines_on_small_data(tmp_path):
         # core ranking keys always present; routine_targets gracefully absent
         assert {"y_true", "y_scores", "time_slots", "user_ids"} <= set(d.files)
         assert "routine_targets" not in d.files
+
+
+def test_evaluate_driver_reports_alignment(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    n = 6
+    rng = np.random.default_rng(3)
+    arrays = {
+        "y_true": rng.integers(0, 11, size=n).astype(np.int64),
+        "y_scores": rng.standard_normal((n, 11)).astype(np.float32),
+        "time_slots": np.arange(n, dtype=np.int64),
+        "user_ids": np.zeros(n, dtype=np.int64),
+        "routine_targets": rng.integers(0, 11, size=n).astype(np.int64),
+    }
+    npz = tmp_path / "predictions.npz"
+    np.savez(npz, model=np.array("gru4rec"), **arrays)
+
+    out_json = tmp_path / "report.json"
+    subprocess.run(
+        [sys.executable, "evaluate.py",
+         "--predictions", str(npz), "--out", str(out_json), "--ks", "1"],
+        check=True, cwd=".",
+    )
+    report = json.loads(out_json.read_text())
+    assert "alignment_accuracy" in report
+    assert "alignment_hit_rate@1" in report
+    assert "realism_minus_alignment_accuracy" in report
+    assert "alignment_skipped" not in report
