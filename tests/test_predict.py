@@ -107,3 +107,24 @@ def test_run_ranking_predictions_no_routines_keeps_four_keys():
     out = run_ranking_predictions(model, seqs, cfg, batch_size=16)
     assert "routine_targets" not in out
     assert set(out) == {"y_true", "y_scores", "time_slots", "user_ids"}
+
+
+def test_predict_from_checkpoint_skips_routines_on_small_data(tmp_path):
+    # 20 fake users -> train split too small for build_routines
+    # (min_cluster_size=30); predict must still succeed, just without alignment.
+    seqs = _fake_sequences(20)
+    import pickle
+    seq_path = tmp_path / "sequences.pkl"
+    seq_path.write_bytes(pickle.dumps(seqs))
+
+    model = GRU4Rec(n_users=len(seqs))
+    ckpt = tmp_path / "best.pt"
+    torch.save({"model_state": model.state_dict(),
+                "config": _config(len(seqs))}, ckpt)
+
+    out = tmp_path / "predictions_gru4rec.npz"
+    predict_from_checkpoint(str(ckpt), str(seq_path), str(out))
+    with np.load(out) as d:
+        # core ranking keys always present; routine_targets gracefully absent
+        assert {"y_true", "y_scores", "time_slots", "user_ids"} <= set(d.files)
+        assert "routine_targets" not in d.files

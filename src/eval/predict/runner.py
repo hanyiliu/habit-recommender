@@ -11,6 +11,7 @@ from src.data.preprocessing.dataset import (
 )
 from src.data.preprocessing.preprocessor import load_sequences
 from src.models.registry import get_model_class
+from src.scoring.scoring import build_routines
 
 
 def load_checkpoint(checkpoint_path: str) -> dict:
@@ -127,8 +128,28 @@ def predict_from_checkpoint(checkpoint_path: str, sequences_path: str,
         ) from exc
 
     sequences = load_sequences(sequences_path)
+
+    # Reproduce the exact templates training used: same train split (seed +
+    # fracs) and same build_routines(K, random_state) as train_main.py. Fully
+    # determined by config, so no checkpoint-format change is needed. On small
+    # datasets build_routines can fail its min_cluster_size guard; in that case
+    # skip alignment rather than aborting the whole prediction run.
+    routines = None
+    try:
+        train_seqs, _, _ = train_val_test_split(
+            sequences, val_frac=config["val_frac"],
+            test_frac=config["test_frac"], seed=config["seed"],
+        )
+        train_arr = np.stack([train_seqs[uid] for uid in train_seqs])
+        routines, _, _ = build_routines(
+            train_arr, K=config["k_routines"], random_state=config["seed"],
+        )
+    except (ValueError, KeyError) as exc:
+        print(f"Skipping routine alignment (could not build templates): {exc}")
+
     arrays = run_ranking_predictions(
         model, sequences, config, batch_size=batch_size, device=device,
+        routines=routines,
     )
     out_path = out_path or f"data/processed/predictions_{model_name}.npz"
     # np.savez appends .npz when missing; keep the returned path consistent.
