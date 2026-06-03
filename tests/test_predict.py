@@ -82,3 +82,82 @@ def test_predict_from_checkpoint_end_to_end(tmp_path):
     predict_from_checkpoint(str(ckpt), str(seq_path), str(out))
     with np.load(out) as d:
         assert {"y_true", "y_scores", "time_slots", "user_ids"} <= set(d.files)
+
+
+def test_run_ranking_predictions_emits_routine_targets():
+    seqs = _fake_sequences(20)
+    cfg = _config(len(seqs), window=24)
+    model = GRU4Rec(n_users=len(seqs))
+    rng = np.random.default_rng(1)
+    routines = rng.integers(0, 11, size=(3, 48), dtype=np.int64)  # hand-made templates
+    out = run_ranking_predictions(
+        model, seqs, cfg, batch_size=16, routines=routines,
+    )
+    assert "routine_targets" in out
+    n = out["y_true"].shape[0]
+    assert out["routine_targets"].shape == (n,)
+    assert out["routine_targets"].min() >= 0
+    assert out["routine_targets"].max() < 11
+
+
+def test_run_ranking_predictions_no_routines_keeps_four_keys():
+    seqs = _fake_sequences(20)
+    cfg = _config(len(seqs), window=24)
+    model = GRU4Rec(n_users=len(seqs))
+    out = run_ranking_predictions(model, seqs, cfg, batch_size=16)
+    assert "routine_targets" not in out
+    assert set(out) == {"y_true", "y_scores", "time_slots", "user_ids"}
+
+
+def test_predict_from_checkpoint_skips_routines_on_small_data(tmp_path):
+    # 20 fake users -> train split too small for build_routines
+    # (min_cluster_size=30); predict must still succeed, just without alignment.
+    seqs = _fake_sequences(20)
+    import pickle
+    seq_path = tmp_path / "sequences.pkl"
+    seq_path.write_bytes(pickle.dumps(seqs))
+
+    model = GRU4Rec(n_users=len(seqs))
+    ckpt = tmp_path / "best.pt"
+    torch.save({"model_state": model.state_dict(),
+                "config": _config(len(seqs))}, ckpt)
+
+    out = tmp_path / "predictions_gru4rec.npz"
+    predict_from_checkpoint(str(ckpt), str(seq_path), str(out))
+    with np.load(out) as d:
+        # core ranking keys always present; routine_targets gracefully absent
+        assert {"y_true", "y_scores", "time_slots", "user_ids"} <= set(d.files)
+        assert "routine_targets" not in d.files
+
+
+def test_evaluate_driver_reports_alignment(tmp_path):
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    n = 6
+    rng = np.random.default_rng(3)
+    arrays = {
+        "y_true": rng.integers(0, 11, size=n).astype(np.int64),
+        "y_scores": rng.standard_normal((n, 11)).astype(np.float32),
+        "time_slots": np.arange(n, dtype=np.int64),
+        "user_ids": np.zeros(n, dtype=np.int64),
+        "routine_targets": rng.integers(0, 11, size=n).astype(np.int64),
+    }
+    npz = tmp_path / "predictions.npz"
+    np.savez(npz, model=np.array("gru4rec"), **arrays)
+
+    out_json = tmp_path / "report.json"
+    repo_root = Path(__file__).resolve().parent.parent
+    subprocess.run(
+        [sys.executable, str(repo_root / "evaluate.py"),
+         "--predictions", str(npz), "--out", str(out_json), "--ks", "1"],
+        check=True, cwd=str(repo_root),
+    )
+    report = json.loads(out_json.read_text())
+    assert "alignment_accuracy" in report
+    assert "alignment_hit_rate@1" in report
+    assert "alignment_ndcg@1" in report
+    assert "realism_minus_alignment_accuracy" in report
+    assert "alignment_skipped" not in report
