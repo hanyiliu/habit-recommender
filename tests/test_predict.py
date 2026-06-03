@@ -134,6 +134,7 @@ def test_evaluate_driver_reports_alignment(tmp_path):
     import json
     import subprocess
     import sys
+    from pathlib import Path
 
     n = 6
     rng = np.random.default_rng(3)
@@ -148,13 +149,15 @@ def test_evaluate_driver_reports_alignment(tmp_path):
     np.savez(npz, model=np.array("gru4rec"), **arrays)
 
     out_json = tmp_path / "report.json"
+    repo_root = Path(__file__).resolve().parent.parent
     subprocess.run(
-        [sys.executable, "evaluate.py",
+        [sys.executable, str(repo_root / "evaluate.py"),
          "--predictions", str(npz), "--out", str(out_json), "--ks", "1"],
-        check=True, cwd=".",
+        check=True, cwd=str(repo_root),
     )
     report = json.loads(out_json.read_text())
     assert "alignment_accuracy" in report
     assert "alignment_hit_rate@1" in report
+    assert "alignment_ndcg@1" in report
     assert "realism_minus_alignment_accuracy" in report
     assert "alignment_skipped" not in report
