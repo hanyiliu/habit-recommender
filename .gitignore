@@ -2,3 +2,4 @@ docs
 .claude
 __pycache__/
 *.pyc
+checkpoints/
