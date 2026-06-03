@@ -84,4 +84,6 @@ def test_evaluate_model_smoke():
     metrics = evaluate_model(DummyModel(), loader)
     assert "accuracy" in metrics
     assert "hit_rate@5" in metrics
+    assert "alignment_accuracy" in metrics
+    assert "alignment_hit_rate@5" in metrics
     assert all(isinstance(v, float) for k, v in metrics.items() if not k.startswith("per_class"))
