@@ -82,3 +82,28 @@ def test_predict_from_checkpoint_end_to_end(tmp_path):
     predict_from_checkpoint(str(ckpt), str(seq_path), str(out))
     with np.load(out) as d:
         assert {"y_true", "y_scores", "time_slots", "user_ids"} <= set(d.files)
+
+
+def test_run_ranking_predictions_emits_routine_targets():
+    seqs = _fake_sequences(20)
+    cfg = _config(len(seqs), window=24)
+    model = GRU4Rec(n_users=len(seqs))
+    rng = np.random.default_rng(1)
+    routines = rng.integers(0, 11, size=(3, 48), dtype=np.int64)  # hand-made templates
+    out = run_ranking_predictions(
+        model, seqs, cfg, batch_size=16, routines=routines,
+    )
+    assert "routine_targets" in out
+    n = out["y_true"].shape[0]
+    assert out["routine_targets"].shape == (n,)
+    assert out["routine_targets"].min() >= 0
+    assert out["routine_targets"].max() < 11
+
+
+def test_run_ranking_predictions_no_routines_keeps_four_keys():
+    seqs = _fake_sequences(20)
+    cfg = _config(len(seqs), window=24)
+    model = GRU4Rec(n_users=len(seqs))
+    out = run_ranking_predictions(model, seqs, cfg, batch_size=16)
+    assert "routine_targets" not in out
+    assert set(out) == {"y_true", "y_scores", "time_slots", "user_ids"}

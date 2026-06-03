@@ -30,11 +30,15 @@ def load_checkpoint(checkpoint_path: str) -> dict:
 
 @torch.no_grad()
 def run_ranking_predictions(model, sequences: dict, config: dict,
-                            batch_size: int = 256, device: str = "cpu") -> dict:
+                            batch_size: int = 256, device: str = "cpu",
+                            routines: np.ndarray | None = None) -> dict:
     """Run the model over the deterministic test split; return Regime-A arrays.
 
     Returns dict with: y_true (N,), y_scores (N, n_classes), time_slots (N,),
-    user_ids (N,). The test split and example order are fully determined by
+    user_ids (N,). When ``routines`` (a (K, 48) template array) is supplied,
+    also returns routine_targets (N,) — the activity the nearest template
+    prescribes at each predicted slot, for alignment evaluation. The test split
+    and example order are fully determined by
     config['seed'/'val_frac'/'test_frac'/'window'], so output is reproducible.
     """
     model = model.to(device).eval()
@@ -56,11 +60,18 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
     test_keys = list(test_seqs.keys())
     arr = np.stack([test_seqs[k] for k in test_keys])
     uids = np.array([user_to_idx[k] for k in test_keys], dtype=np.int64)
-    ds = HabitDataset(arr, window_size=window, user_ids=uids)  # 3-tuple (x, y, user_id)
+    ds = HabitDataset(
+        arr, window_size=window, user_ids=uids, routines=routines,
+    )  # 4-tuple (x, y, user_id, routine_target) when routines is given
     loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0)
 
-    y_scores, y_true, user_ids = [], [], []
-    for context, targets, batch_uids in loader:
+    y_scores, y_true, user_ids, routine_targets = [], [], [], []
+    for batch in loader:
+        if routines is None:
+            context, targets, batch_uids = batch
+        else:
+            context, targets, batch_uids, batch_rt = batch
+            routine_targets.append(batch_rt)
         logits = model(context.to(device), batch_uids.to(device)).cpu()
         y_scores.append(logits)
         y_true.append(targets)
@@ -74,12 +85,15 @@ def run_ranking_predictions(model, sequences: dict, config: dict,
     wps = ds.windows_per_seq
     time_slots = (np.arange(len(ds)) % wps + window).astype(np.int64)
 
-    return {
+    out = {
         "y_true": y_true.astype(np.int64),
         "y_scores": y_scores.astype(np.float32),
         "time_slots": time_slots,
         "user_ids": user_ids.astype(np.int64),
     }
+    if routines is not None:
+        out["routine_targets"] = torch.cat(routine_targets).numpy().astype(np.int64)
+    return out
 
 
 def save_predictions(arrays: dict, out_path: str, model_name: str) -> None:
