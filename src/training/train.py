@@ -17,7 +17,7 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: DataLoader,
         lr: float = 1e-3,
-        lambda_kl: float = 0.5,
+        lambda_align: float = 0.5,
         device: str = "cpu",
         config: dict | None = None,
         track_val_metrics: bool = False,
@@ -25,7 +25,7 @@ class Trainer:
         self.model             = model.to(device)
         self.train_loader      = train_loader
         self.val_loader        = val_loader
-        self.lambda_kl         = lambda_kl
+        self.lambda_align         = lambda_align
         self.device            = device
         self.config            = config
         self.track_val_metrics = track_val_metrics
@@ -47,7 +47,7 @@ class Trainer:
             routine_targets = routine_targets.to(self.device)
             self.optimizer.zero_grad()
             logits = self.model(context, user_ids)
-            loss   = combined_loss(logits, targets, routine_targets, self.lambda_kl)
+            loss   = combined_loss(logits, targets, routine_targets, self.lambda_align)
             loss.backward()
             self.optimizer.step()
             total += loss.item()
@@ -65,7 +65,7 @@ class Trainer:
             targets         = targets.to(self.device)
             routine_targets = routine_targets.to(self.device)
             logits = self.model(context, user_ids)
-            loss   = combined_loss(logits, targets, routine_targets, self.lambda_kl)
+            loss   = combined_loss(logits, targets, routine_targets, self.lambda_align)
             total += loss.item()
         return total / len(self.val_loader)
 

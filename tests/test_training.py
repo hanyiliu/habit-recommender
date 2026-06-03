@@ -61,12 +61,12 @@ def test_fit_saves_checkpoint(tmp_path):
     assert "val_loss"        in saved
 
 
-def test_fit_with_lambda_kl_zero(tmp_path):
-    # fidelity-only ablation: lambda_kl=0.0 must still train without error
+def test_fit_with_lambda_align_zero(tmp_path):
+    # fidelity-only ablation: lambda_align=0.0 must still train without error
     model   = GRU4Rec(n_users=5)
     loader  = _make_toy_loader()
     ckpt    = str(tmp_path / "best.pt")
-    trainer = Trainer(model, loader, loader, lambda_kl=0.0)
+    trainer = Trainer(model, loader, loader, lambda_align=0.0)
     history = trainer.fit(n_epochs=1, checkpoint_path=ckpt)
     assert history[0]["train_loss"] > 0
 

@@ -252,8 +252,8 @@ def plot_ablation_comparison(
 ):
     """
     Grouped bar chart comparing several metrics across model variants. Useful
-    for the lambda=0 vs lambda>0 (fidelity-only vs CE+KL) ablation: one group per
-    variant, one bar per metric.
+    for the lambda=0 vs lambda>0 (fidelity-only vs fidelity+alignment) ablation:
+    one group per variant, one bar per metric.
 
     Parameters
     ----------

@@ -16,8 +16,8 @@ class HabitDataset(Dataset):
 
     When ``routines`` is supplied a fourth element is appended:
         routine_target  scalar long tensor  — activity at the predicted slot
-                         taken from the nearest routine template (for the KL
-                         term of ``combined_loss``).
+                         taken from the nearest routine template (the target of
+                         the alignment cross-entropy term in ``combined_loss``).
 
     Args:
         sequences    (N, num_slots) int array of category indices per slot

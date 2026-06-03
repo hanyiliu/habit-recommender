@@ -119,28 +119,23 @@ template-alignment loss.
   exhaustively — no separate retrieval stage.
 
 ### Loss function
-`L = L_CE + λ · L_KL` (`src/models/loss/combined_loss.py`):
-- **`L_CE`** — softmax cross-entropy of the model's distribution against the
-  true next activity (the fidelity term). With only 11 activity classes the
-  model already scores every candidate, so full cross-entropy is the natural,
-  lower-variance choice — no negative sampling needed.
-
-  > **Correction vs. earlier spec:** the fidelity term is **softmax
-  > cross-entropy**, not BPR. BPR's negative sampling is meant for huge item
-  > catalogs; with 11 classes each example has only 10 negatives, so sampling
-  > `n_neg=10` was nearly the full set anyway. Cross-entropy is cleaner and
-  > lower-variance here.
-
-- **`L_KL`** — KL divergence between the model's distribution and a one-hot at
-  the template's target activity for that slot, implemented as cross-entropy
-  (`kl_loss`). The nudging term.
-- `λ` (`--lambda-kl`, default 0.5) trades nudging vs. sequence fidelity.
+`L = L_fidelity + λ · L_align` (`src/models/loss/combined_loss.py`). Both terms
+are softmax cross-entropy; they differ only in their target:
+- **`L_fidelity`** — cross-entropy of the model's distribution against the
+  **true next activity**. With only 11 activity classes the model already scores
+  every candidate, so full softmax cross-entropy is the natural, lower-variance
+  choice — no negative sampling needed.
+- **`L_align`** — cross-entropy against the **template's target activity** at
+  that slot (`template_cross_entropy`). The nudging term: it pulls predictions
+  toward the matched healthy archetype. (The template target is a one-hot, so
+  this is an exact cross-entropy.)
+- `λ` (`--lambda-align`, default 0.5) trades alignment nudging vs. fidelity.
 
 ### Comparison models (ablations)
 - **LSTM** — same architecture, GRU → LSTM.
 - **Transformer** — single-head self-attention over the slot sequence.
 - **GRU4Rec (λ=0)** — fidelity-only (pure cross-entropy), isolates the
-  template-alignment contribution (supported today via `--lambda-kl 0`).
+  template-alignment contribution (supported today via `--lambda-align 0`).
 
 ---
 
@@ -164,7 +159,7 @@ ATUS raw .dat  →  parse + 30-min discretize  →  map to 11 categories
    →  k-means into K archetypes
    →  score individuals → filter top-N per cluster → per-slot mode → K templates
    →  per-user sliding windows + K templates
-   →  GRU4Rec training (L_CE + λ·L_KL)
+   →  GRU4Rec training (L_fidelity + λ·L_align)
    →  inference: match partial day → nearest template (Hamming);
       GRU predicts next activity nudged toward template
    →  recommended next activity
@@ -205,7 +200,7 @@ What is built vs. what is still planned, so the spec stays honest.
 - Health-scored template builder: k-means, 5-feature individual scoring,
   top-fraction filtering, per-slot-mode templates, small-cluster merging,
   K × threshold sweep.
-- GRU4Rec (64/64 → 128 → 128 → 11), cross-entropy + λ·KL loss, λ=0 ablation, user-ID
+- GRU4Rec (64/64 → 128 → 128 → 11), fidelity + λ·alignment cross-entropy loss, λ=0 ablation, user-ID
   personalization, Hamming template matching.
 - LSTM / Transformer ablation models (`LSTMRec`, `TransformerRec`), sharing
   GRU4Rec's `forward(sequences, user_ids) -> (B, 11)` interface and resolved via
@@ -217,7 +212,7 @@ What is built vs. what is still planned, so the spec stays honest.
 
 ### 🟡 Planned — noted, not yet implemented
 1. **Model selection by validation NDCG@10.** Current training selects the best
-   checkpoint by **validation loss** (combined CE+KL) and `λ` is not yet tuned
+   checkpoint by **validation loss** (combined fidelity+alignment CE) and `λ` is not yet tuned
    on NDCG@10 (`src/training/train.py`). Selecting/tuning on validation NDCG@10
    is a planned refinement.
 2. **Multi-year ATUS ingestion.** `preprocess.py` currently loads a single year

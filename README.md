@@ -11,9 +11,11 @@ Sleep, Grooming, Work, Education, Eating, Socializing,
 Leisure/Screen, Household, Exercise, Travel, Other
 ```
 
-A GRU4Rec sequence model is trained with a combined **cross-entropy + KL** loss
-to predict the next activity given a sliding-window context, with routine
-"templates" derived from K-means clustering of training-day sequences.
+A GRU4Rec sequence model is trained with a combined **cross-entropy** loss — a
+fidelity term against the true next activity plus a weighted alignment term
+against a routine "template" — to predict the next activity given a
+sliding-window context. Templates are derived from K-means clustering of
+training-day sequences.
 
 ## Setup
 
@@ -55,7 +57,7 @@ one of the 11 activity categories, builds 48-slot daily sequences, and writes
 python train_main.py
 ```
 
-Trains **GRU4Rec** with the combined cross-entropy + KL loss, saves the best checkpoint
+Trains **GRU4Rec** with the combined cross-entropy loss, saves the best checkpoint
 to `checkpoints/best.pt`, and prints test-set ranking metrics
 (`accuracy`, `hit_rate@5`, `ndcg@5`).
 
@@ -65,7 +67,7 @@ Common flags (see `python train_main.py --help` for the full list):
 python train_main.py \
     --model gru4rec \
     --epochs 50 \
-    --lambda-kl 0.5 \      # KL loss weight (0.0 = fidelity-only / cross-entropy-only ablation)
+    --lambda-align 0.5 \   # alignment (template) cross-entropy weight (0.0 = fidelity-only ablation)
     --window 24 \          # sliding-window context size in slots
     --k-routines 10 \      # K-means clusters for routine building
     --batch-size 256 \

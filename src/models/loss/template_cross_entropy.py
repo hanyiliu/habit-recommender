@@ -12,8 +12,8 @@ def template_cross_entropy(
     This is the alignment / nudging term: it pushes the model's distribution
     toward the activity the matched healthy template prescribes at the predicted
     slot. It is the same loss function as the fidelity term — plain
-    cross-entropy — just pointed at a different target. (With a one-hot target it
-    also equals KL(one_hot || softmax(logits)), since the target's entropy is 0.)
+    cross-entropy — just pointed at the template target instead of the true
+    next activity.
 
     Args:
         logits (torch.Tensor, (B, n_activities)): Unnormalized scores

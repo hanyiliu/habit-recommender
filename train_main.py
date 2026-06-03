@@ -4,7 +4,7 @@
 Usage:
     python train_main.py                                 # GRU4Rec defaults
     python train_main.py --model lstm --epochs 50
-    python train_main.py --model transformer --lambda-kl 0.0
+    python train_main.py --model transformer --lambda-align 0.0
     python train_main.py --model gru4rec --device cuda
 """
 import argparse
@@ -70,8 +70,9 @@ def build_args() -> argparse.Namespace:
     p.add_argument("--epochs",     type=int,   default=50)
     p.add_argument("--batch-size", type=int,   default=256)
     p.add_argument("--lr",         type=float, default=1e-3)
-    p.add_argument("--lambda-kl",  type=float, default=0.5,
-                   help="KL loss weight (0.0 = fidelity-only / cross-entropy-only ablation)")
+    p.add_argument("--lambda-align",  type=float, default=0.5,
+                   help="weight of the template (alignment) cross-entropy term "
+                        "(0.0 = fidelity-only ablation)")
     p.add_argument("--k-routines", type=int,   default=10,
                    help="Number of K-means clusters for routine building")
     p.add_argument("--window",     type=int,   default=24,
@@ -141,7 +142,7 @@ def main():
         train_loader,
         val_loader,
         lr=args.lr,
-        lambda_kl=args.lambda_kl,
+        lambda_align=args.lambda_align,
         device=args.device,
         config=config,
     )

@@ -10,16 +10,18 @@
 # %% [markdown]
 # # End-to-End λ-Selection: Fidelity vs. Routine Alignment
 #
-# The model is trained with `L = CE + λ·L_KL`. The cross-entropy term rewards
-# predicting the user's **actual** next activity (fidelity); the KL term nudges predictions
-# toward the nearest healthy **routine template** (alignment). This notebook
+# The model is trained with `L = CE_fidelity + λ·CE_align` — two softmax
+# cross-entropy terms. The fidelity term rewards predicting the user's
+# **actual** next activity; the alignment term nudges predictions toward the
+# nearest healthy **routine template**. This notebook
 # runs a **two-stage** search on GRU4Rec: a cheap coarse λ-sweep (short epoch
 # budget) measures both axes on the held-out test split and picks λ* as the
 # most-aligned model whose fidelity stays within 5% of the λ=0 ceiling; the
 # winning λ* is then retrained at the **full** epoch budget for final metrics.
 #
-# Caveats (kept honest): both axes are *in-sample to the loss* — fidelity tracks
-# what the cross-entropy term optimizes, alignment tracks what KL optimizes — and alignment here is
+# Caveats (kept honest): both axes are *in-sample to the loss* — each axis
+# tracks one of the two cross-entropy terms (fidelity ↔ true-activity CE,
+# alignment ↔ template CE) — and alignment here is
 # a *single-step* proxy, not a full-day behavioral outcome. λ* is a candidate to
 # later confirm against a cumulative deviation-reduction metric (Regime B).
 
@@ -154,7 +156,7 @@ def train_or_load(lmbda, n_epochs):
     model = GRU4Rec(n_users=len(sequences))
     trainer = Trainer(
         model, train_loader, val_loader,
-        lr=LR, lambda_kl=lmbda, device=DEVICE, config=CONFIG,
+        lr=LR, lambda_align=lmbda, device=DEVICE, config=CONFIG,
         track_val_metrics=True,  # record accuracy/Hit@5/NDCG@5 (fidelity+alignment) each epoch
     )
     history = trainer.fit(n_epochs, checkpoint_path=str(ckpt_path))
@@ -342,7 +344,7 @@ fig.tight_layout()
 fig.savefig("examples/demo_outputs/realism_gap.png", bbox_inches="tight", dpi=150)
 plt.show()
 
-# The routine templates the KL term nudges toward.
+# The routine templates the alignment term nudges toward.
 plot_template_heatmap(routines, activity_labels=CATEGORIES,
                       title="Healthy routine templates",
                       save_path="examples/demo_outputs/templates_used.png")
@@ -361,7 +363,7 @@ plt.show()
 #   length, widen the sweep budget).
 # - The **realism gap** narrows monotonically with λ, making the
 #   fidelity↔nudge trade explicit.
-# - **Caveats:** both axes are in-sample to the loss (fidelity≈cross-entropy, alignment≈KL),
+# - **Caveats:** both axes are in-sample to the loss (each axis ≈ one of the two cross-entropy terms),
 #   so the curve shows the *menu* of trades, not which is "best" — that is set by
 #   the fidelity floor. Alignment is a single-step proxy; the final confirmation
 #   of λ\* is a full-day cumulative deviation-reduction metric (Regime B), which
