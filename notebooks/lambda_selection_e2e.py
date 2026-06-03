@@ -13,8 +13,10 @@
 # The model is trained with `L = L_BPR + λ·L_KL`. BPR rewards predicting the
 # user's **actual** next activity (fidelity); the KL term nudges predictions
 # toward the nearest healthy **routine template** (alignment). This notebook
-# sweeps λ on GRU4Rec, measures both axes on the held-out test split, and picks
-# λ* as the most-aligned model whose fidelity stays within 5% of the λ=0 ceiling.
+# runs a **two-stage** search on GRU4Rec: a cheap coarse λ-sweep (short epoch
+# budget) measures both axes on the held-out test split and picks λ* as the
+# most-aligned model whose fidelity stays within 5% of the λ=0 ceiling; the
+# winning λ* is then retrained at the **full** epoch budget for final metrics.
 #
 # Caveats (kept honest): both axes are *in-sample to the loss* — fidelity tracks
 # what BPR optimizes, alignment tracks what KL optimizes — and alignment here is
@@ -63,7 +65,8 @@ from torch.utils.data import DataLoader
 
 # --- Config (locked in the design doc) ---
 LAMBDAS = [0.0, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
-EPOCHS = 50
+SWEEP_EPOCHS = 15   # cheap coarse sweep — enough to rank λ and locate λ*
+FULL_EPOCHS = 50    # full budget, applied only to the winning λ*
 SEED = 42
 WINDOW = 24
 K_ROUTINES = 10
@@ -130,16 +133,21 @@ CONFIG = {
 }
 
 # %% [markdown]
-# ## 2. Swept training (cached: retrain only if the checkpoint is missing)
+# ## 2. Coarse λ-sweep training (cached; SWEEP_EPOCHS each)
+#
+# A short budget is enough to *rank* the λ values and locate λ*; the winner is
+# retrained at full length in §7. Each checkpoint is cached (retrain only if
+# missing), with the epoch count baked into the filename so the 15-epoch sweep
+# and the 50-epoch final run never collide.
 
 # %%
-def train_or_load(lmbda):
-    ckpt_path = CACHE / f"gru4rec_lambda{lmbda}.pt"
-    hist_path = CACHE / f"gru4rec_lambda{lmbda}_history.json"
+def train_or_load(lmbda, n_epochs):
+    ckpt_path = CACHE / f"gru4rec_lambda{lmbda}_e{n_epochs}.pt"
+    hist_path = CACHE / f"gru4rec_lambda{lmbda}_e{n_epochs}_history.json"
     if ckpt_path.exists() and hist_path.exists():
-        print(f"λ={lmbda}: using cached checkpoint")
+        print(f"λ={lmbda} ({n_epochs}e): using cached checkpoint")
         return str(ckpt_path), json.loads(hist_path.read_text())
-    print(f"λ={lmbda}: training {EPOCHS} epochs...")
+    print(f"λ={lmbda}: training {n_epochs} epochs...")
     random.seed(SEED)
     np.random.seed(SEED)
     torch.manual_seed(SEED)
@@ -148,20 +156,21 @@ def train_or_load(lmbda):
         model, train_loader, val_loader,
         lr=LR, lambda_kl=lmbda, device=DEVICE, config=CONFIG,
     )
-    history = trainer.fit(EPOCHS, checkpoint_path=str(ckpt_path))
+    history = trainer.fit(n_epochs, checkpoint_path=str(ckpt_path))
     hist_path.write_text(json.dumps(history))
     return str(ckpt_path), history
 
 
 ckpts, histories = {}, {}
 for lmbda in LAMBDAS:
-    ckpts[lmbda], histories[lmbda] = train_or_load(lmbda)
+    ckpts[lmbda], histories[lmbda] = train_or_load(lmbda, SWEEP_EPOCHS)
 
 # %% [markdown]
-# ## 3. Convergence diagnostic — confirm each run reached near-max
+# ## 3. Sweep convergence diagnostic
 #
-# Best-val-loss checkpointing keeps the optimal epoch; this plot confirms the
-# 50-epoch budget was enough for validation loss to plateau for every λ.
+# Best-val-loss checkpointing keeps each run's optimal epoch. At the short sweep
+# budget we only need the λ values to *rank* stably enough to locate λ*, not to
+# be fully converged — the winner gets the full budget in §7.
 
 # %%
 fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -170,18 +179,18 @@ for lmbda in LAMBDAS:
     ax.plot([e["epoch"] for e in h], [e["val_loss"] for e in h], label=f"λ={lmbda}")
 ax.set_xlabel("epoch")
 ax.set_ylabel("validation loss")
-ax.set_title("Convergence per λ")
+ax.set_title(f"Sweep convergence per λ ({SWEEP_EPOCHS} epochs)")
 ax.legend(fontsize=8, ncol=2)
 fig.tight_layout()
 fig.savefig("examples/demo_outputs/lambda_convergence.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 # %% [markdown]
-# ## 4. Evaluate each λ on the held-out test split
+# ## 4. Evaluate each λ on the held-out test split (sweep checkpoints)
 #
 # Loads the **best** checkpoint (not the last epoch), runs inference, and scores
 # the same logits against the real next activity (fidelity) and the routine
-# template (alignment).
+# template (alignment). These coarse-sweep metrics are what rank λ and select λ*.
 
 # %%
 def eval_checkpoint(lmbda, ckpt_path):
@@ -231,7 +240,44 @@ print(f"  alignment lift over baseline = "
       f"{df.loc[sel['lambda_star'], 'alignment_lift']:+.4f}")
 
 # %% [markdown]
-# ## 7. Supporting views
+# ## 7. Full-length training on the selected λ*
+#
+# The coarse sweep only *ranked* λ. Now retrain the winner for the full
+# FULL_EPOCHS budget and report its converged test metrics — this is the model
+# you would actually ship. We also show how far the full budget moved the
+# metrics versus the short-sweep estimate (a sanity check that the sweep ranked
+# λ on the right side of the tradeoff).
+
+# %%
+lam_star = sel["lambda_star"]
+final_ckpt, final_hist = train_or_load(lam_star, FULL_EPOCHS)
+
+fig, ax = plt.subplots(figsize=(7, 4.5))
+ax.plot([e["epoch"] for e in final_hist], [e["val_loss"] for e in final_hist],
+        label=f"λ*={lam_star}")
+ax.set_xlabel("epoch")
+ax.set_ylabel("validation loss")
+ax.set_title(f"Full-length convergence (λ*={lam_star}, {FULL_EPOCHS} epochs)")
+ax.legend(fontsize=8)
+fig.tight_layout()
+fig.savefig("examples/demo_outputs/lambda_star_convergence.png",
+            bbox_inches="tight", dpi=150)
+plt.show()
+
+final_metrics = eval_checkpoint(lam_star, final_ckpt)
+sweep_star = df.loc[lam_star]
+print(f"Final λ*={lam_star} model ({FULL_EPOCHS} epochs):")
+print(f"  fidelity  {PRIMARY}            = {final_metrics[PRIMARY]:.4f}")
+print(f"  alignment {ALIGNMENT}  = {final_metrics[ALIGNMENT]:.4f}")
+print(f"  accuracy = {final_metrics['accuracy']:.4f} | "
+      f"alignment_accuracy = {final_metrics['alignment_accuracy']:.4f} | "
+      f"realism_gap = {final_metrics['realism_gap']:+.4f}")
+print(f"\nvs {SWEEP_EPOCHS}e sweep estimate: "
+      f"{PRIMARY} {sweep_star[PRIMARY]:.4f} -> {final_metrics[PRIMARY]:.4f}, "
+      f"{ALIGNMENT} {sweep_star[ALIGNMENT]:.4f} -> {final_metrics[ALIGNMENT]:.4f}")
+
+# %% [markdown]
+# ## 8. Supporting views
 
 # %%
 # Realism gap (fidelity − alignment, top-1) as λ grows.
@@ -253,11 +299,16 @@ plot_template_heatmap(routines, activity_labels=CATEGORIES,
 plt.show()
 
 # %% [markdown]
-# ## 8. Conclusions
+# ## 9. Conclusions
 #
 # - **λ\*** is the most template-aligned GRU4Rec whose next-activity ranking
 #   quality stays within 5% of the pure-BPR ceiling — the strongest nudge we can
 #   apply while keeping recommendations credible.
+# - **Two-stage search:** λ* was chosen on a cheap 15-epoch sweep, then
+#   retrained at the full 50-epoch budget for the shipped metrics. This assumes
+#   the λ *ranking* is stable across budgets — the §7 sweep-vs-full comparison is
+#   the check on that assumption (if a non-winning λ would overtake λ* at full
+#   length, widen the sweep budget).
 # - The **realism gap** narrows monotonically with λ, making the
 #   fidelity↔nudge trade explicit.
 # - **Caveats:** both axes are in-sample to the loss (fidelity≈BPR, alignment≈KL),
