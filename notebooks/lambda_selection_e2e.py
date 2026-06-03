@@ -155,6 +155,7 @@ def train_or_load(lmbda, n_epochs):
     trainer = Trainer(
         model, train_loader, val_loader,
         lr=LR, lambda_kl=lmbda, device=DEVICE, config=CONFIG,
+        track_val_metrics=True,  # record accuracy/Hit@5/NDCG@5 (fidelity+alignment) each epoch
     )
     history = trainer.fit(n_epochs, checkpoint_path=str(ckpt_path))
     hist_path.write_text(json.dumps(history))
@@ -183,6 +184,37 @@ ax.set_title(f"Sweep convergence per λ ({SWEEP_EPOCHS} epochs)")
 ax.legend(fontsize=8, ncol=2)
 fig.tight_layout()
 fig.savefig("examples/demo_outputs/lambda_convergence.png", bbox_inches="tight", dpi=150)
+plt.show()
+
+# %% [markdown]
+# Per-epoch **validation metrics** — accuracy, Hit@5, NDCG@5 — measured against
+# both the ground-truth next activity (top row, *fidelity*) and the optimal
+# routine template (bottom row, *alignment*), one line per λ. This is the
+# "more detail" view: you can watch fidelity decay and alignment rise with λ
+# over the course of training, not just the loss.
+
+# %%
+_FID = [("accuracy", "accuracy"), ("hit_rate@5", "Hit@5"), ("ndcg@5", "NDCG@5")]
+_ALI = [("alignment_accuracy", "accuracy"), ("alignment_hit_rate@5", "Hit@5"),
+        ("alignment_ndcg@5", "NDCG@5")]
+fig, axes = plt.subplots(2, 3, figsize=(14, 7), sharex=True)
+for col in range(3):
+    fk, label = _FID[col]
+    ak, _ = _ALI[col]
+    for lmbda in LAMBDAS:
+        h = histories[lmbda]
+        ep = [e["epoch"] for e in h]
+        axes[0, col].plot(ep, [e[fk] for e in h], label=f"λ={lmbda}")
+        axes[1, col].plot(ep, [e[ak] for e in h], label=f"λ={lmbda}")
+    axes[0, col].set_title(f"Fidelity {label} (vs ground truth)")
+    axes[1, col].set_title(f"Alignment {label} (vs optimal template)")
+    axes[1, col].set_xlabel("epoch")
+axes[0, 0].set_ylabel("metric")
+axes[1, 0].set_ylabel("metric")
+axes[0, 0].legend(fontsize=7, ncol=2)
+fig.suptitle(f"Per-epoch validation metrics across the λ sweep ({SWEEP_EPOCHS} epochs)")
+fig.tight_layout()
+fig.savefig("examples/demo_outputs/lambda_sweep_metrics.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 # %% [markdown]
@@ -262,6 +294,24 @@ ax.legend(fontsize=8)
 fig.tight_layout()
 fig.savefig("examples/demo_outputs/lambda_star_convergence.png",
             bbox_inches="tight", dpi=150)
+plt.show()
+
+# Per-epoch fidelity & alignment metrics over the full λ* training run.
+fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharex=True)
+ep = [e["epoch"] for e in final_hist]
+for k, label in _FID:
+    axes[0].plot(ep, [e[k] for e in final_hist], label=label)
+for k, label in _ALI:
+    axes[1].plot(ep, [e[k] for e in final_hist], label=label)
+axes[0].set_title(f"Fidelity (vs ground truth) — λ*={lam_star}")
+axes[1].set_title(f"Alignment (vs optimal template) — λ*={lam_star}")
+for a in axes:
+    a.set_xlabel("epoch")
+    a.set_ylabel("metric")
+    a.legend(fontsize=8)
+fig.suptitle(f"Per-epoch validation metrics over full training (λ*={lam_star}, {FULL_EPOCHS} epochs)")
+fig.tight_layout()
+fig.savefig("examples/demo_outputs/lambda_star_metrics.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 final_metrics = eval_checkpoint(lam_star, final_ckpt)

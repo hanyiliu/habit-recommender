@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from src.models.loss.combined_loss import combined_loss
+from src.eval.evaluation import evaluate_ranking, evaluate_alignment
 
 
 class Trainer:
@@ -19,13 +20,15 @@ class Trainer:
         lambda_kl: float = 0.5,
         device: str = "cpu",
         config: dict | None = None,
+        track_val_metrics: bool = False,
     ):
-        self.model        = model.to(device)
-        self.train_loader = train_loader
-        self.val_loader   = val_loader
-        self.lambda_kl    = lambda_kl
-        self.device       = device
-        self.config       = config
+        self.model             = model.to(device)
+        self.train_loader      = train_loader
+        self.val_loader        = val_loader
+        self.lambda_kl         = lambda_kl
+        self.device            = device
+        self.config            = config
+        self.track_val_metrics = track_val_metrics
         self.optimizer    = torch.optim.Adam(model.parameters(), lr=lr)
         self.scheduler    = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode="min", patience=5, factor=0.5
@@ -66,6 +69,28 @@ class Trainer:
             total += loss.item()
         return total / len(self.val_loader)
 
+    @torch.no_grad()
+    def val_ranking_metrics(self) -> dict:
+        """Per-epoch validation ranking + alignment metrics.
+
+        Returns accuracy / hit_rate@5 / ndcg@5 measured against both the true
+        next activity (fidelity) and the routine-template activity (alignment,
+        prefixed ``alignment_``), in a single forward pass over the val set.
+        """
+        self.model.eval()
+        all_logits, all_targets, all_routine = [], [], []
+        for context, targets, user_ids, routine_targets in self.val_loader:
+            logits = self.model(context.to(self.device), user_ids.to(self.device)).cpu()
+            all_logits.append(logits)
+            all_targets.append(targets)
+            all_routine.append(routine_targets)
+        logits  = torch.cat(all_logits).numpy()
+        targets = torch.cat(all_targets).numpy()
+        routine = torch.cat(all_routine).numpy()
+        metrics = evaluate_ranking(targets, logits, ks=(5,))
+        metrics.update(evaluate_alignment(routine, logits, ks=(5,)))
+        return metrics
+
     def fit(
         self,
         n_epochs: int,
@@ -79,7 +104,10 @@ class Trainer:
             train_loss = self.train_epoch()
             val_loss   = self.validate()
             self.scheduler.step(val_loss)
-            history.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
+            record = {"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss}
+            if self.track_val_metrics:
+                record.update(self.val_ranking_metrics())
+            history.append(record)
             if val_loss < self.best_val:
                 self.best_val = val_loss
                 torch.save(

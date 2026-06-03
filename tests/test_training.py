@@ -71,6 +71,30 @@ def test_fit_with_lambda_kl_zero(tmp_path):
     assert history[0]["train_loss"] > 0
 
 
+def test_fit_tracks_val_metrics_when_enabled(tmp_path):
+    # With track_val_metrics=True, each history entry carries per-epoch
+    # validation ranking + alignment metrics (fidelity vs ground truth AND
+    # alignment vs routine template).
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    ckpt    = str(tmp_path / "best.pt")
+    trainer = Trainer(model, loader, loader, track_val_metrics=True)
+    history = trainer.fit(n_epochs=1, checkpoint_path=ckpt)
+    h = history[0]
+    for key in ("accuracy", "hit_rate@5", "ndcg@5",
+                "alignment_accuracy", "alignment_hit_rate@5", "alignment_ndcg@5"):
+        assert key in h, f"missing per-epoch metric {key!r}"
+
+
+def test_fit_without_tracking_has_no_metric_keys(tmp_path):
+    # Default is off: history stays loss-only (no extra eval cost).
+    model   = GRU4Rec(n_users=5)
+    loader  = _make_toy_loader()
+    trainer = Trainer(model, loader, loader)
+    history = trainer.fit(n_epochs=1, checkpoint_path=str(tmp_path / "best.pt"))
+    assert "accuracy" not in history[0]
+
+
 def test_fit_saves_config(tmp_path):
     model  = GRU4Rec(n_users=5)
     loader = _make_toy_loader()
