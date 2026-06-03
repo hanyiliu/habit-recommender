@@ -49,6 +49,7 @@ def test_evaluate_alignment_no_match():
     res = evaluate_alignment(routine_targets, y_scores, ks=(1,))
     assert res["alignment_accuracy"] == 0.0
     assert res["alignment_hit_rate@1"] == 0.0
+    assert res["alignment_ndcg@1"] == 0.0
 
 
 def test_evaluate_alignment_keys_are_prefixed():
