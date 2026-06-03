@@ -138,6 +138,26 @@ def evaluate_ranking(
     return out
 
 
+def evaluate_alignment(
+    routine_targets,
+    y_scores,
+    ks: Sequence[int] = (1, 3, 5, 10),
+) -> dict:
+    """Alignment of model scores with the nearest optimal-routine template.
+
+    ``routine_targets[i]`` is the activity the matched healthy template
+    prescribes at sample i's predicted slot (see RoutineMatcher). This reuses
+    the ranking metrics, but measured against the template instead of the
+    user's actual next activity, so every key is prefixed with ``alignment_``.
+
+    A high ``alignment_accuracy`` means the model's top suggestion matches the
+    optimal schedule; compare it against ``accuracy`` (agreement with real
+    behavior) to see how aspirational vs. realistic the model is.
+    """
+    base = evaluate_ranking(routine_targets, y_scores, ks=ks)
+    return {f"alignment_{key}": value for key, value in base.items()}
+
+
 def per_class_accuracy(
     y_true,
     y_scores,
