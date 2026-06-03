@@ -11,12 +11,17 @@ class LSTMRec(nn.Module):
         user_dim: int = 64,
         hidden_size: int = 128,
         n_layers: int = 1,
+        use_user_embedding: bool = True,
     ):
         super().__init__()
+        self.use_user_embedding = use_user_embedding
         self.activity_embed = nn.Embedding(n_activities, activity_dim)
-        self.user_embed = nn.Embedding(n_users, user_dim)
+        lstm_input_size = activity_dim
+        if use_user_embedding:
+            self.user_embed = nn.Embedding(n_users, user_dim)
+            lstm_input_size += user_dim
         self.lstm = nn.LSTM(
-            input_size=activity_dim + user_dim,
+            input_size=lstm_input_size,
             hidden_size=hidden_size,
             num_layers=n_layers,
             batch_first=True,
@@ -39,8 +44,11 @@ class LSTMRec(nn.Module):
         """
         B, T = sequences.shape
         act_emb = self.activity_embed(sequences)
-        user_emb = self.user_embed(user_ids).unsqueeze(1).expand(-1, T, -1)
-        lstm_input = torch.cat([act_emb, user_emb], dim=-1)    # (B, T, 128)
+        if self.use_user_embedding:
+            user_emb = self.user_embed(user_ids).unsqueeze(1).expand(-1, T, -1)
+            lstm_input = torch.cat([act_emb, user_emb], dim=-1)    # (B, T, 128)
+        else:
+            lstm_input = act_emb                                   # (B, T, activity_dim)
         output, _ = self.lstm(lstm_input)                       # (B, T, hidden)
         logits = self.output_proj(output[:, -1, :])             # (B, n_activities)
         return logits

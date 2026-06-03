@@ -83,7 +83,29 @@ FLOOR_FRAC = 0.05
 SEQ_PATH = Path("data/processed/sequences.pkl")
 CACHE = Path("checkpoints/sweep")
 CACHE.mkdir(parents=True, exist_ok=True)
-Path("examples/demo_outputs").mkdir(parents=True, exist_ok=True)
+# Per-run output directory (timestamped); plots + a full text log land here.
+from datetime import datetime
+RUN_ID = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+RUN_DIR = Path("outputs") / RUN_ID
+RUN_DIR.mkdir(parents=True, exist_ok=True)
+
+# Tee stdout/stderr so everything printed below is also saved to the run's log file.
+import sys
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+            s.flush()
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+if not isinstance(sys.stdout, _Tee):
+    _log_fh = open(RUN_DIR / "run.log", "w")
+    sys.stdout = _Tee(sys.stdout, _log_fh)
+    sys.stderr = _Tee(sys.stderr, _log_fh)
+print(f"Run outputs -> {RUN_DIR}")
 
 # %% [markdown]
 # ## 1. Data: sequences, split, routines
@@ -125,7 +147,7 @@ val_loader = _loader(val_seqs, False)
 # a config field), so templates rebuild identically at eval time.
 CONFIG = {
     "model": "gru4rec",
-    "model_kwargs": {"n_users": len(sequences)},
+    "model_kwargs": {"n_users": len(sequences), "use_user_embedding": False},
     "window": WINDOW,
     "val_frac": 0.10,
     "test_frac": 0.10,
@@ -153,7 +175,7 @@ def train_or_load(lmbda, n_epochs):
     random.seed(SEED)
     np.random.seed(SEED)
     torch.manual_seed(SEED)
-    model = GRU4Rec(n_users=len(sequences))
+    model = GRU4Rec(**CONFIG["model_kwargs"])
     trainer = Trainer(
         model, train_loader, val_loader,
         lr=LR, lambda_align=lmbda, device=DEVICE, config=CONFIG,
@@ -185,7 +207,7 @@ ax.set_ylabel("validation loss")
 ax.set_title(f"Sweep convergence per λ ({SWEEP_EPOCHS} epochs)")
 ax.legend(fontsize=8, ncol=2)
 fig.tight_layout()
-fig.savefig("examples/demo_outputs/lambda_convergence.png", bbox_inches="tight", dpi=150)
+fig.savefig(f"{RUN_DIR}/lambda_convergence.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 # %% [markdown]
@@ -216,7 +238,7 @@ axes[1, 0].set_ylabel("metric")
 axes[0, 0].legend(fontsize=7, ncol=2)
 fig.suptitle(f"Per-epoch validation metrics across the λ sweep ({SWEEP_EPOCHS} epochs)")
 fig.tight_layout()
-fig.savefig("examples/demo_outputs/lambda_sweep_metrics.png", bbox_inches="tight", dpi=150)
+fig.savefig(f"{RUN_DIR}/lambda_sweep_metrics.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 # %% [markdown]
@@ -256,7 +278,7 @@ sel = select_lambda(results, primary_metric=PRIMARY,
 fig, ax = plot_alignment_tradeoff(
     results, fidelity_key=PRIMARY, alignment_key=ALIGNMENT,
     selected_lambda=sel["lambda_star"], floor=sel["floor"],
-    save_path="examples/demo_outputs/lambda_tradeoff.png",
+    save_path=f"{RUN_DIR}/lambda_tradeoff.png",
 )
 plt.show()
 
@@ -294,7 +316,7 @@ ax.set_ylabel("validation loss")
 ax.set_title(f"Full-length convergence (λ*={lam_star}, {FULL_EPOCHS} epochs)")
 ax.legend(fontsize=8)
 fig.tight_layout()
-fig.savefig("examples/demo_outputs/lambda_star_convergence.png",
+fig.savefig(f"{RUN_DIR}/lambda_star_convergence.png",
             bbox_inches="tight", dpi=150)
 plt.show()
 
@@ -313,7 +335,7 @@ for a in axes:
     a.legend(fontsize=8)
 fig.suptitle(f"Per-epoch validation metrics over full training (λ*={lam_star}, {FULL_EPOCHS} epochs)")
 fig.tight_layout()
-fig.savefig("examples/demo_outputs/lambda_star_metrics.png", bbox_inches="tight", dpi=150)
+fig.savefig(f"{RUN_DIR}/lambda_star_metrics.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 final_metrics = eval_checkpoint(lam_star, final_ckpt)
@@ -341,13 +363,13 @@ ax.set_ylabel("realism gap (accuracy − alignment_accuracy)")
 ax.set_title("Realism gap shrinks as λ increases")
 ax.legend(fontsize=8)
 fig.tight_layout()
-fig.savefig("examples/demo_outputs/realism_gap.png", bbox_inches="tight", dpi=150)
+fig.savefig(f"{RUN_DIR}/realism_gap.png", bbox_inches="tight", dpi=150)
 plt.show()
 
 # The routine templates the alignment term nudges toward.
 plot_template_heatmap(routines, activity_labels=CATEGORIES,
                       title="Healthy routine templates",
-                      save_path="examples/demo_outputs/templates_used.png")
+                      save_path=f"{RUN_DIR}/templates_used.png")
 plt.show()
 
 # %% [markdown]
